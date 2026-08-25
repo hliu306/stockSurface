@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股市场 · 时间的河流</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; font-family:'SF Mono','Monaco','Menlo',monospace; }
+
+/* navbar */
+#navbar {
+  position:fixed; top:0; right:0; z-index:50; display:flex; gap:2px;
+  padding:8px 16px;
+}
+.nav-item {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:5px 12px; font-size:10px;
+  font-family:'SF Mono',monospace; border-radius:4px; cursor:pointer;
+  transition:all 0.15s; text-decoration:none; letter-spacing:1px;
+}
+.nav-item:hover { background:rgba(255,255,255,0.12); color:#fff; }
+.nav-item.active { background:rgba(100,180,255,0.25); border-color:rgba(100,180,255,0.4); color:#6bf; }
+canvas { display:block; }
+#hud {
+  position:fixed; top:0; left:0; width:100%; padding:16px 24px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.85) 0%, transparent 100%);
+  color:#fff; pointer-events:none; z-index:10;
+}
+#hud h1 { font-size:17px; font-weight:300; letter-spacing:4px; opacity:0.9; }
+#hud .sub { font-size:10px; opacity:0.4; margin-top:3px; letter-spacing:1px; }
+
+#controls {
+  position:fixed; bottom:0; left:0; width:100%; padding:14px 24px;
+  background:linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; z-index:10;
+  display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap;
+}
+.ctrl-group { display:flex; flex-direction:column; gap:4px; }
+.ctrl-group label { font-size:9px; opacity:0.5; letter-spacing:1px; text-transform:uppercase; white-space:nowrap; }
+.ctrl-group select, .ctrl-group button, .ctrl-group input[type="date"] {
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+  color:#fff; padding:5px 8px; font-family:inherit; font-size:11px;
+  border-radius:4px; cursor:pointer; transition:all 0.15s;
+}
+.ctrl-group select:hover, .ctrl-group button:hover, .ctrl-group input:hover {
+  background:rgba(255,255,255,0.15); border-color:rgba(255,255,255,0.3);
+}
+.ctrl-group button.active { background:rgba(100,180,255,0.3); border-color:rgba(100,180,255,0.5); }
+.ctrl-group input[type="range"] {
+  -webkit-appearance:none; width:100px; height:4px;
+  background:rgba(255,255,255,0.15); border-radius:2px; outline:none; cursor:pointer;
+}
+.ctrl-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:12px; height:12px; border-radius:50%;
+  background:#6bf; cursor:pointer;
+}
+.ctrl-group input[type="date"] { color-scheme:dark; }
+.val-display { font-size:10px; opacity:0.7; min-width:30px; text-align:center; }
+
+#legend {
+  position:fixed; right:20px; top:50%; transform:translateY(-50%);
+  display:flex; flex-direction:column; gap:3px; z-index:10;
+}
+.legend-bar { width:18px; height:3px; border-radius:2px; }
+.legend-label { font-size:8px; color:rgba(255,255,255,0.6); margin-bottom:1px; letter-spacing:1px; }
+
+#tooltip {
+  position:fixed; display:none; background:rgba(0,0,0,0.92);
+  border:1px solid rgba(255,255,255,0.2); border-radius:6px;
+  padding:8px 12px; font-size:11px; color:#fff;
+  pointer-events:none; z-index:20; min-width:150px;
+}
+#tooltip .tt-date { font-size:12px; font-weight:bold; margin-bottom:4px; }
+#tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; opacity:0.8; }
+#tooltip .tt-val { color:#6bf; font-weight:bold; }
+#loading {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:#fff; font-size:13px; letter-spacing:3px; opacity:0.6; z-index:5;
+}
+#error {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:#f55; font-size:13px; max-width:600px; text-align:center; z-index:30;
+  display:none; padding:20px; background:rgba(20,0,0,0.9); border-radius:8px;
+}
+
+/* playhead label */
+#playhead-info {
+  position:fixed; top:60px; left:50%; transform:translateX(-50%);
+  color:#6bf; font-size:14px; font-weight:bold; z-index:10;
+  text-shadow:0 0 10px rgba(100,180,255,0.5);
+  display:none; pointer-events:none;
+}
+
+/* hover mini-chart */
+#mini-chart {
+  position:fixed; display:none; z-index:25;
+  background:rgba(0,0,0,0.92); border:1px solid rgba(100,180,255,0.4);
+  border-radius:8px; padding:8px; pointer-events:none;
+}
+#mini-chart canvas { display:block; border-radius:4px; }
+#mini-chart .mc-title {
+  font-size:11px; color:#6bf; margin-bottom:4px; font-weight:bold;
+  letter-spacing:1px; text-align:center;
+}
+#mini-chart .mc-stats {
+  display:flex; gap:12px; justify-content:center; margin-top:4px;
+  font-size:9px; color:rgba(255,255,255,0.6);
+}
+#mini-chart .mc-stats span { color:#6bf; }
+
+/* highlighted ridge line container is in 3D scene */
+
+/* section panel */
+#section-panel {
+  position:fixed; right:14px; bottom:70px; z-index:15;
+  background:rgba(0,0,0,0.88); border:1px solid rgba(255,255,255,0.12);
+  border-radius:8px; overflow:hidden; width:330px;
+}
+#section-panel .sp-header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.08);
+  font-size:10px; color:rgba(255,255,255,0.6); letter-spacing:1.5px;
+}
+#section-panel .sp-header button {
+  background:rgba(100,180,255,0.15); border:1px solid rgba(100,180,255,0.3);
+  color:#6bf; padding:2px 10px; border-radius:4px; cursor:pointer;
+  font-size:10px; font-family:inherit;
+}
+#section-panel .sp-header button:hover { background:rgba(100,180,255,0.3); }
+#section-panel .sp-header button.active { background:rgba(100,180,255,0.4); color:#fff; }
+#section-panel .sp-body { padding:8px 12px 10px; }
+#section-panel .sp-slider-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+#section-panel .sp-slider-row input[type="range"] {
+  -webkit-appearance:none; flex:1; height:4px; background:rgba(255,255,255,0.15);
+  border-radius:2px; outline:none; cursor:pointer;
+}
+#section-panel .sp-slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+  background:#6bf; cursor:pointer;
+}
+#section-panel .sp-date { font-size:10px; color:#6bf; min-width:80px; text-align:right; }
+#section-panel .sp-hint { font-size:8px; color:rgba(255,255,255,0.3); margin-top:4px; text-align:center; }
+#section-panel canvas { display:block; margin:0 auto; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="phase.html">相空间</a>
+    <a class="nav-item" href="marketstates.html">市场状态</a>
+      <a class="nav-item" href="marketscore.html">市场评分</a>
+        <a class="nav-item" href="liquidity.html">流动性</a>
+  <a class="nav-item active" href="index.html">3D波浪</a>
+  <a class="nav-item" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="state.html">温度计</a>
+  <a class="nav-item" href="calendar.html">日历热力</a>
+</div>
+
+<div id="hud">
+  <h1>A股市场 · 时间的河流</h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="loading">LOADING DATA...</div>
+<div id="error"></div>
+<div id="playhead-info"></div>
+
+<div id="controls">
+  <!-- METRIC -->
+  <div class="ctrl-group">
+    <label>指标 METRIC</label>
+    <select id="metric">
+      <option value="mean_ret">日均收益率</option>
+      <option value="median_ret">中位收益率</option>
+      <option value="std_ret">截面波动率</option>
+      <option value="up_pct">上涨家数占比</option>
+      <option value="total_amount">成交额(亿)</option>
+      <option value="amt_share">量价热力</option>
+      <option value="mean_atv">个股ATV(缩放量)</option>
+      <option value="ind_atv">板块ATV</option>
+    </select>
+  </div>
+
+  <!-- VIEW -->
+  <div class="ctrl-group">
+    <label>视角 VIEW</label>
+    <select id="viewmode">
+      <option value="industry">按行业(细分)</option>
+      <option value="decile">按流动性十分位</option>
+      <option value="single">全市场</option>
+    </select>
+  </div>
+
+  <!-- GRANULARITY -->
+  <div class="ctrl-group">
+    <label>颗粒度 GRANULARITY</label>
+    <select id="granularity">
+      <option value="1">每日 (Daily)</option>
+      <option value="5">每周 (~5日)</option>
+      <option value="20">每月 (~20日)</option>
+      <option value="60" selected>每季 (~60日)</option>
+    </select>
+  </div>
+
+  <!-- SMOOTH -->
+  <div class="ctrl-group">
+    <label>平滑 SMOOTH</label>
+    <select id="smooth">
+      <option value="0">无</option>
+      <option value="3">3点</option>
+      <option value="5" selected>5点</option>
+    </select>
+  </div>
+
+  <!-- TIME RANGE -->
+  <div class="ctrl-group">
+    <label>起始 FROM</label>
+    <input type="date" id="dateStart">
+  </div>
+  <div class="ctrl-group">
+    <label>结束 TO</label>
+    <input type="date" id="dateEnd">
+  </div>
+
+  <!-- HEIGHT SCALE -->
+  <div class="ctrl-group">
+    <label>高度 HEIGHT <span class="val-display" id="heightVal">1.0×</span></label>
+    <input type="range" id="heightScale" min="0.2" max="3.0" step="0.1" value="1.0">
+  </div>
+
+  <!-- PLAYBACK -->
+  <div class="ctrl-group">
+    <label>播放 PLAY</label>
+    <button id="playBtn">▶ 播放</button>
+  </div>
+
+  <!-- QUICK RANGES -->
+  <div class="ctrl-group">
+    <label>快捷 QUICK</label>
+    <select id="quickRange">
+      <option value="">— 选时段 —</option>
+      <option value="2015-01-01,2015-12-31">2015 股灾</option>
+      <option value="2018-01-01,2018-12-31">2018 贸易战</option>
+      <option value="2020-01-01,2020-12-31">2020 疫情</option>
+      <option value="2021-01-01,2021-12-31">2021 核心资产</option>
+      <option value="2024-01-01,2026-12-31">2024-26 近期</option>
+      <option value="all">全部</option>
+    </select>
+  </div>
+
+  <div class="ctrl-group">
+    <label>视角</label>
+    <button id="camReset">重置</button>
+  </div>
+  <div class="ctrl-group">
+    <label>旋转</label>
+    <button id="autoRot">自动</button>
+  </div>
+  <div class="ctrl-group">
+    <label>VIX叠加</label>
+    <button id="vixToggle">开启</button>
+  </div>
+</div>
+
+<div id="legend"></div>
+<div id="tooltip"></div>
+
+<!-- 剖面面板 -->
+<div id="section-panel">
+  <div class="sp-header">
+    <span>剖面 SECTION</span>
+    <button id="spToggle">开启</button>
+  </div>
+  <div class="sp-body" id="spBody" style="display:none">
+    <div class="sp-slider-row">
+      <input type="range" id="spSlider" min="0" max="100" value="50" step="1">
+      <span class="sp-date" id="spDate">—</span>
+    </div>
+    <canvas id="spCanvas" width="300" height="200"></canvas>
+    <div class="sp-hint">拖动滑块或点击3D波浪选择截面位置</div>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
+<script>
+// ═══════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════
+var scene, camera, renderer, controls;
+var riverMesh = null;
+var axisLines = [], dateLabels = [];
+var playheadMesh = null, playheadLine = null;
+var highlightLine = null;  // hover高亮行业脊线
+var sectionEnabled = false;
+var sectionIdx = 0;
+var sectionPlane = null;   // 3D切面
+var sectionBars = null;    // 3D柱状条
+var vixEnabled = false;
+var vixLine = null;        // 3D VIX折线
+var vixArea = null;        // 3D VIX填充面
+var raycaster, mouse, DATA = null;
+var cfg = {
+  metric:'mean_ret', viewmode:'industry', smooth:5,
+  granularity:60, heightScale:1.0,
+  dateStart:null, dateEnd:null
+};
+var autoRotate = false;
+var playing = false;
+var playheadIdx = 0;
+var playTimer = null;
+
+var METRIC_INFO = {
+  mean_ret:     { name:'日均收益率', unit:'%', desc:'全市场个股日收益率横截面均值', scale:800 },
+  median_ret:   { name:'中位收益率', unit:'%', desc:'全市场个股日收益率中位数', scale:800 },
+  std_ret:      { name:'截面波动率', unit:'%', desc:'当日个股收益率横截面标准差', scale:1500 },
+  up_pct:       { name:'上涨家数占比', unit:'%', desc:'上涨股票数/全部交易股票', scale:200 },
+  total_amount: { name:'成交额', unit:'亿', desc:'全市场当日总成交金额', scale:0 },
+  amt_share:    { name:'量价热力', unit:'%', desc:'行业成交额占比(高度) × 涨跌幅(颜色)', scale:4000, heatmap:true },
+  mean_atv:     { name:'个股ATV(缩放量)', unit:'', desc:'个股异常换手率ATV=ln(量/20日均量)的市场均值。正值=放量(散户涌入),负值=缩量(锁仓)', scale:60 },
+  ind_atv:      { name:'板块ATV', unit:'', desc:'板块总成交量异常度ATV=ln(板块量/20日均量)。正值=板块放量,负值=板块缩量', scale:60 }
+};
+
+function showError(msg) {
+  document.getElementById('loading').style.display='none';
+  var e = document.getElementById('error');
+  e.style.display='block'; e.textContent = msg;
+}
+
+// ═══════════════════════════════════════════
+// COLOR
+// ═══════════════════════════════════════════
+function retColor(val) {
+  var c = Math.max(-0.05, Math.min(0.05, val));
+  var t = (c + 0.05) / 0.10;
+  var r, g, b;
+  if (t < 0.5) { var s = t*2; r = 0.8-0.6*s; g = 0.15*s; b = 0.08*(1-s); }
+  else { var s2 = (t-0.5)*2; r = 0.2*(1-s2); g = 0.15+0.65*s2; b = 0.1*s2; }
+  return new THREE.Color(r,g,b);
+}
+function volColor(val) {
+  var t = Math.min(1, val/0.06);
+  return new THREE.Color(0.1+0.8*t, 0.2+0.3*t, 0.6-0.5*t);
+}
+function upColor(val) { return retColor((val-0.5)*0.1); }
+function amtColor(val, mx) {
+  var t = Math.min(1, Math.log10(val+1)/Math.log10(mx+1));
+  return new THREE.Color(0.05+0.15*t, 0.2+0.5*t, 0.6-0.2*t);
+}
+function getMetricValue(row) {
+  if (!row) return 0;
+  // ind_atv在行业记录中的字段名是'atv'
+  if (cfg.metric === 'ind_atv' && row.industry !== undefined && row.atv !== undefined) {
+    return row.atv;
+  }
+  var v = row[cfg.metric];
+  return (v == null || isNaN(v)) ? 0 : v;
+}
+function getMetricColor(val) {
+  if (cfg.metric === 'amt_share') return retColor(val); // 热力图: val已是mean_ret
+  if (cfg.metric === 'total_amount') return amtColor(val, 2e12);
+  if (cfg.metric === 'std_ret') return volColor(val);
+  if (cfg.metric === 'up_pct') return upColor(val);
+  if (cfg.metric === 'mean_atv' || cfg.metric === 'ind_atv') return atvColor(val);
+  return retColor(val);
+}
+function atvColor(val) {
+  // ATV: 正值=放量(暖色橙红), 0=中性灰, 负值=缩量(冷色青蓝)
+  var c = Math.max(-0.8, Math.min(0.8, val));
+  var t = (c + 0.8) / 1.6; // 0~1
+  var r, g, b;
+  if (t < 0.5) {
+    // 缩量: 青蓝 → 灰
+    var s = t * 2;
+    r = 0.1 + 0.3 * s;
+    g = 0.5 + 0.1 * s;
+    b = 0.8 - 0.4 * s;
+  } else {
+    // 放量: 灰 → 橙红
+    var s2 = (t - 0.5) * 2;
+    r = 0.4 + 0.5 * s2;
+    g = 0.6 - 0.45 * s2;
+    b = 0.4 - 0.35 * s2;
+  }
+  return new THREE.Color(r, g, b);
+}
+function fmtMetric(val) {
+  if (val == null || isNaN(val)) return 'N/A';
+  if (cfg.metric === 'amt_share') return (val*100).toFixed(2)+'%';
+  if (cfg.metric === 'total_amount') return (val/1e8).toFixed(0)+'亿';
+  if (cfg.metric === 'up_pct') return (val*100).toFixed(1)+'%';
+  if (cfg.metric === 'mean_atv' || cfg.metric === 'ind_atv') {
+    var sign = val >= 0 ? '+' : '';
+    return sign + val.toFixed(3) + (val > 0.3 ? ' ⚡放量' : val < -0.3 ? ' 🔒缩量' : ' 中性');
+  }
+  return (val*100).toFixed(3)+'%';
+}
+
+// ═══════════════════════════════════════════
+// DATA FILTERING & RESAMPLING
+// ═══════════════════════════════════════════
+function getFilteredDaily() {
+  var daily = DATA.daily;
+  var ds = cfg.dateStart, de = cfg.dateEnd;
+  var filtered = [];
+  for (var i = 0; i < daily.length; i++) {
+    var d = daily[i].date_str;
+    if (ds && d < ds) continue;
+    if (de && d > de) continue;
+    filtered.push(daily[i]);
+  }
+  return filtered;
+}
+
+function getFilteredIndustry() {
+  if (!DATA.industry) return [];
+  var ds = cfg.dateStart, de = cfg.dateEnd;
+  var out = [];
+  for (var i = 0; i < DATA.industry.length; i++) {
+    var d = DATA.industry[i].date_str;
+    if (ds && d < ds) continue;
+    if (de && d > de) continue;
+    out.push(DATA.industry[i]);
+  }
+  return out;
+}
+
+function getFilteredDecile() {
+  if (!DATA.decile) return [];
+  var ds = cfg.dateStart, de = cfg.dateEnd;
+  var out = [];
+  for (var i = 0; i < DATA.decile.length; i++) {
+    var d = DATA.decile[i].date_str;
+    if (ds && d < ds) continue;
+    if (de && d > de) continue;
+    out.push(DATA.decile[i]);
+  }
+  return out;
+}
+
+// Resample: aggregate N daily rows into one bucket
+function resample(daily, segDataRaw, bucketSize) {
+  if (bucketSize <= 1) return { daily: daily, board: segDataRaw };
+  var nBuckets = Math.ceil(daily.length / bucketSize);
+  var newDaily = [];
+
+  // For metric aggregation, we need numeric fields
+  var metricFields = ['mean_ret','median_ret','std_ret','up_pct','total_amount','mean_atv','mean_ind_atv'];
+
+  for (var b = 0; b < nBuckets; b++) {
+    var startIdx = b * bucketSize;
+    var endIdx = Math.min(startIdx + bucketSize, daily.length);
+    var bucketRows = daily.slice(startIdx, endIdx);
+    if (bucketRows.length === 0) continue;
+
+    var agg = { date_str: bucketRows[bucketRows.length-1].date_str };
+    for (var fi = 0; fi < metricFields.length; fi++) {
+      var f = metricFields[fi];
+      var sum = 0, cnt = 0;
+      for (var bi = 0; bi < bucketRows.length; bi++) {
+        var v = bucketRows[bi][f];
+        if (v != null && !isNaN(v)) { sum += v; cnt++; }
+      }
+      agg[f] = cnt > 0 ? sum/cnt : 0;
+    }
+    // n_stocks/n_up/n_down: take last day's
+    agg.n_stocks = bucketRows[bucketRows.length-1].n_stocks || 0;
+    agg.n_up = bucketRows[bucketRows.length-1].n_up || 0;
+    agg.n_down = bucketRows[bucketRows.length-1].n_down || 0;
+    agg._bucketStart = bucketRows[0].date_str;
+    agg._bucketEnd = bucketRows[bucketRows.length-1].date_str;
+    agg._bucketSize = bucketRows.length;
+    newDaily.push(agg);
+  }
+
+  // Resample segment data
+  var newBoard = [];
+  if (segDataRaw && segDataRaw.length > 0) {
+    // Group by segment key, then bucket
+    var segKeys = {};
+    for (var sk = 0; sk < segDataRaw.length; sk++) {
+      var row = segDataRaw[sk];
+      var key = row.industry !== undefined ? row.industry : row.decile;
+      if (!segKeys[key]) segKeys[key] = [];
+      segKeys[key].push(row);
+    }
+    for (var key2 in segKeys) {
+      var segRows = segKeys[key2];
+      var nB = Math.ceil(segRows.length / bucketSize);
+      for (var b2 = 0; b2 < nB; b2++) {
+        var sIdx = b2*bucketSize;
+        var eIdx = Math.min(sIdx+bucketSize, segRows.length);
+        var bRows = segRows.slice(sIdx, eIdx);
+        var agg2 = { date_str: bRows[bRows.length-1].date_str };
+        if (bRows[0].industry !== undefined) agg2.industry = bRows[0].industry;
+        if (bRows[0].decile !== undefined) agg2.decile = bRows[0].decile;
+        for (var fi2 = 0; fi2 < metricFields.length; fi2++) {
+          var f2 = metricFields[fi2];
+          var sum2 = 0, cnt2 = 0;
+          for (var bi2 = 0; bi2 < bRows.length; bi2++) {
+            var v2 = bRows[bi2][f2];
+            if (v2 != null && !isNaN(v2)) { sum2 += v2; cnt2++; }
+          }
+          agg2[f2] = cnt2 > 0 ? sum2/cnt2 : 0;
+        }
+        agg2.n_stocks = bRows[bRows.length-1].n_stocks || 0;
+        agg2.n_up = bRows[bRows.length-1].n_up || 0;
+        newBoard.push(agg2);
+      }
+    }
+  }
+
+  return { daily: newDaily, board: newBoard };
+}
+
+// ═══════════════════════════════════════════
+// INIT THREE.JS
+// ═══════════════════════════════════════════
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+  scene.fog = new THREE.FogExp2(0x000000, 0.0005);
+
+  camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 5000);
+  camera.position.set(0, 160, 300);
+
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  document.body.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.minDistance = 20;
+  controls.maxDistance = 5000;
+  controls.maxPolarAngle = Math.PI * 0.495;
+  controls.zoomSpeed = 1.5;
+
+  scene.add(new THREE.AmbientLight(0x404060, 1.5));
+  var dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(50, 200, 100); scene.add(dir);
+  var dir2 = new THREE.DirectionalLight(0x6688ff, 0.3);
+  dir2.position.set(-50, 100, -100); scene.add(dir2);
+
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+
+  window.addEventListener('resize', onResize);
+  renderer.domElement.addEventListener('mousemove', onMouseMove);
+  renderer.domElement.addEventListener('mouseleave', onMouseLeave);
+}
+
+// ═══════════════════════════════════════════
+// BUILD RIVER
+// ═══════════════════════════════════════════
+var RIVER_META = null; // store geometry meta for playhead/tooltips
+
+function buildRiver() {
+  if (riverMesh) { scene.remove(riverMesh); riverMesh.geometry.dispose(); riverMesh.material.dispose(); riverMesh = null; }
+  removeHighlight();
+  removeSection();
+  removeVIX();
+  for (var i = 0; i < axisLines.length; i++) scene.remove(axisLines[i]);
+  for (var j = 0; j < dateLabels.length; j++) scene.remove(dateLabels[j]);
+  axisLines = []; dateLabels = [];
+  removePlayhead();
+
+  // 1. Filter by date range
+  var fDaily = getFilteredDaily();
+  if (fDaily.length < 2) { showError('当前时间范围内数据不足'); return; }
+
+  // 2. Get segment data
+  var fSegRaw;
+  if (cfg.viewmode === 'industry') fSegRaw = getFilteredIndustry();
+  else if (cfg.viewmode === 'decile') fSegRaw = getFilteredDecile();
+  else fSegRaw = [];
+
+  // 3. Resample by granularity
+  var bucketSize = parseInt(cfg.granularity) || 1;
+  var resampled = resample(fDaily, fSegRaw, bucketSize);
+  var daily = resampled.daily;
+  var segData = resampled.board;
+
+  var nDays = daily.length;
+  var info = METRIC_INFO[cfg.metric];
+
+  // 4. Determine segments
+  var segments, segLabels;
+  if (cfg.viewmode === 'industry') {
+    var seen = {};
+    segments = [];
+    for (var k = 0; k < segData.length; k++) {
+      var m = segData[k].industry;
+      if (!seen[m]) { seen[m]=true; segments.push(m); }
+    }
+    segments.sort();
+    segLabels = segments;
+  } else if (cfg.viewmode === 'decile') {
+    var seenD = {};
+    segments = [];
+    for (var k2 = 0; k2 < segData.length; k2++) {
+      var dc = segData[k2].decile;
+      if (!seenD[dc]) { seenD[dc]=true; segments.push(dc); }
+    }
+    segments.sort(function(a,b){return a-b;});
+    segLabels = [];
+    for (var s0 = 0; s0 < segments.length; s0++) {
+      var dn = segments[s0];
+      segLabels.push('D'+dn+(dn===1?'(小)':dn===10?'(大)':''));
+    }
+  } else {
+    segments = ['全市场L','全市场R'];
+    segLabels = ['全市场',''];
+    segData = [];
+    for (var d0 = 0; d0 < daily.length; d0++) {
+      var cL = {}, cR = {};
+      for (var key0 in daily[d0]) { cL[key0]=daily[d0][key0]; cR[key0]=daily[d0][key0]; }
+      cL.industry='全市场L'; cR.industry='全市场R';
+      segData.push(cL); segData.push(cR);
+    }
+  }
+  var nSegs = segments.length;
+
+  // 5. Lookup
+  var lookup = {};
+  for (var r0 = 0; r0 < segData.length; r0++) {
+    var row = segData[r0];
+    var segKey = row.industry !== undefined ? row.industry : row.decile;
+    lookup[row.date_str+'|'+segKey] = row;
+  }
+
+  // 6. Value matrix
+  var matrix = [];
+  var colorMatrix = [];  // 用于热力图模式：存mean_ret
+  for (var d = 0; d < nDays; d++) {
+    var rowData = [], colorRowData = [];
+    // 量价热力: 需要当天行业成交额占比
+    if (cfg.metric === 'amt_share') {
+      var dayTotal = 0;
+      for (var s0 = 0; s0 < nSegs; s0++) {
+        var lk0 = lookup[daily[d].date_str+'|'+segments[s0]];
+        dayTotal += lk0 ? (lk0.total_amount || 0) : 0;
+      }
+      for (var s = 0; s < nSegs; s++) {
+        var lk = lookup[daily[d].date_str+'|'+segments[s]];
+        var share = (lk && dayTotal > 0) ? (lk.total_amount || 0) / dayTotal : 0;
+        rowData.push(share);
+        colorRowData.push(lk ? (lk.mean_ret || 0) : (daily[d].mean_ret || 0));
+      }
+    } else {
+      for (var s2 = 0; s2 < nSegs; s2++) {
+        var lk2 = lookup[daily[d].date_str+'|'+segments[s2]];
+        rowData.push(lk2 ? getMetricValue(lk2) : getMetricValue(daily[d]));
+        colorRowData.push(lk2 ? (lk2.mean_ret || 0) : (daily[d].mean_ret || 0));
+      }
+    }
+    matrix.push(rowData);
+    colorMatrix.push(colorRowData);
+  }
+
+  // 7. Smooth
+  var sm = [];
+  for (var d2 = 0; d2 < nDays; d2++) sm.push(matrix[d2].slice());
+  if (cfg.smooth > 1) {
+    var win = Math.min(parseInt(cfg.smooth), 5);
+    for (var s1 = 0; s1 < nSegs; s1++) {
+      for (var d3 = 0; d3 < nDays; d3++) {
+        var sum = 0, cnt = 0;
+        for (var w = -win; w <= win; w++) {
+          var idx = d3+w;
+          if (idx >= 0 && idx < nDays) { sum += matrix[idx][s1]; cnt++; }
+        }
+        sm[d3][s1] = sum/cnt;
+      }
+    }
+  }
+  // 同样平滑颜色矩阵
+  var smColor = [];
+  for (var dc = 0; dc < nDays; dc++) smColor.push(colorMatrix[dc].slice());
+  if (cfg.smooth > 1) {
+    var win2 = Math.min(parseInt(cfg.smooth), 5);
+    for (var sc = 0; sc < nSegs; sc++) {
+      for (var dc2 = 0; dc2 < nDays; dc2++) {
+        var sumC = 0, cntC = 0;
+        for (var wc = -win2; wc <= win2; wc++) {
+          var idxC = dc2+wc;
+          if (idxC >= 0 && idxC < nDays) { sumC += colorMatrix[idxC][sc]; cntC++; }
+        }
+        smColor[dc2][sc] = sumC/cntC;
+      }
+    }
+  }
+
+  // 8. Geometry
+  var scale = info.scale * cfg.heightScale;
+  var daySpacing = 2.5;
+  var segSpacing = 14;
+  var totalLen = nDays * daySpacing;
+  var totalWid = nSegs * segSpacing;
+  var xOff = -totalLen/2;
+  var zOff = -totalWid/2;
+
+  var positions = [], colors = [], indices = [];
+  var heights = []; // store raw height for playhead
+
+  for (var dd = 0; dd < nDays; dd++) {
+    var rowHeights = [];
+    for (var ss = 0; ss < nSegs; ss++) {
+      var x = xOff + dd*daySpacing;
+      var z = zOff + ss*segSpacing;
+      var rawVal = sm[dd][ss];
+      var hv;
+      if (cfg.metric === 'amt_share') hv = rawVal * scale; // 占比×scale
+      else if (cfg.metric === 'up_pct') hv = (rawVal-0.5)*scale;
+      else if (cfg.metric === 'total_amount') hv = Math.log10(rawVal+1)*28*cfg.heightScale;
+      else hv = rawVal*scale;
+      var wave = Math.sin(dd*0.04 + ss*0.25)*1.0;
+      var y = hv + wave;
+      positions.push(x, y, z);
+      rowHeights.push(y);
+      // 热力图模式: 颜色来自colorMatrix(mean_ret)，其他模式: 颜色来自值本身
+      var colorVal = (cfg.metric === 'amt_share') ? smColor[dd][ss] : rawVal;
+      var c = getMetricColor(colorVal);
+      colors.push(c.r, c.g, c.b);
+    }
+    heights.push(rowHeights);
+  }
+
+  for (var d4 = 0; d4 < nDays-1; d4++) {
+    for (var s2 = 0; s2 < nSegs-1; s2++) {
+      var a = d4*nSegs+s2;
+      var b = d4*nSegs+s2+1;
+      var cc = (d4+1)*nSegs+s2;
+      var dd2 = (d4+1)*nSegs+s2+1;
+      indices.push(a,cc,b, b,cc,dd2);
+    }
+  }
+
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  var mat = new THREE.MeshPhongMaterial({
+    vertexColors:true, side:THREE.DoubleSide,
+    transparent:true, opacity:0.88, shininess:80, specular:0x222244
+  });
+  riverMesh = new THREE.Mesh(geo, mat);
+  scene.add(riverMesh);
+
+  // Store meta for playhead & tooltips
+  RIVER_META = {
+    nDays:nDays, nSegs:nSegs, daily:daily,
+    daySpacing:daySpacing, segSpacing:segSpacing,
+    xOff:xOff, zOff:zOff, totalLen:totalLen, totalWid:totalWid,
+    heights:heights,
+    segments: segments,
+    crossMatrix: sm,   // 平滑后的指标矩阵 [day][seg]
+    colorMatrix: smColor,  // 平滑后的颜色矩阵 [day][seg]
+    isHeatmap: (cfg.metric === 'amt_share')
+  };
+
+  // 9. AXES
+  // --- Y轴 (指标值标尺) ---
+  // 计算数据范围
+  var allVals = [];
+  for (var av1 = 0; av1 < nDays; av1++)
+    for (var av2 = 0; av2 < nSegs; av2++)
+      allVals.push(sm[av1][av2]);
+  var valMax = Math.max.apply(null, allVals);
+  var valMin = Math.min.apply(null, allVals);
+  var absMax = Math.max(Math.abs(valMax), Math.abs(valMin), 0.001);
+
+  // Y轴位置：在时间轴起点左侧
+  var yAxisX = xOff - 12;
+  var yAxisZ = zOff - 10;
+  // 根据metric确定Y轴刻度值
+  var yTicks = [];
+  if (cfg.metric === 'total_amount') {
+    // 对数刻度: 1亿,10亿,100亿,1000亿,1万亿
+    var pows = [1e8, 1e9, 1e10, 1e11, 1e12];
+    for (var pi = 0; pi < pows.length; pi++) {
+      var hv = Math.log10(pows[pi]+1)*28*cfg.heightScale;
+      yTicks.push({ y: hv, label: (pows[pi]/1e8>=10000 ? (pows[pi]/1e12).toFixed(0)+'万亿' : (pows[pi]/1e8).toFixed(0)+'亿') });
+    }
+  } else if (cfg.metric === 'up_pct') {
+    for (var ut = 0.2; ut <= 0.81; ut += 0.15) {
+      var hv2 = (ut-0.5)*scale;
+      yTicks.push({ y: hv2, label: (ut*100).toFixed(0)+'%' });
+    }
+  } else {
+    // 收益率类: 对称刻度
+    var step = absMax > 0.03 ? 0.02 : (absMax > 0.015 ? 0.01 : 0.005);
+    for (var rt = -absMax*1.2; rt <= absMax*1.2 + 0.0001; rt += step) {
+      var hv3 = rt * scale;
+      yTicks.push({ y: hv3, label: (rt*100).toFixed(1)+'%' });
+    }
+  }
+
+  // 画Y轴竖线
+  var yTop = Math.max.apply(null, yTicks.map(function(t){return t.y;}));
+  var yBot = Math.min.apply(null, yTicks.map(function(t){return t.y;}));
+  yTop = Math.max(yTop, 5);
+  yBot = Math.min(yBot, -5);
+  var yLineGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(yAxisX, yBot, yAxisZ),
+    new THREE.Vector3(yAxisX, yTop, yAxisZ)
+  ]);
+  scene.add(new THREE.Line(yLineGeo, new THREE.LineBasicMaterial({color:0x666688,transparent:true,opacity:0.6})));
+  axisLines.push(scene.children[scene.children.length-1]);
+
+  // Y轴刻度和标签
+  for (var yt = 0; yt < yTicks.length; yt++) {
+    var tick = yTicks[yt];
+    // 刻度线
+    var tkGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(yAxisX-2, tick.y, yAxisZ),
+      new THREE.Vector3(yAxisX+2, tick.y, yAxisZ)
+    ]);
+    var tkColor = Math.abs(tick.y) < 1 ? 0x888899 : 0x556677;
+    scene.add(new THREE.Line(tkGeo, new THREE.LineBasicMaterial({color:tkColor,transparent:true,opacity:0.7})));
+    axisLines.push(scene.children[scene.children.length-1]);
+    // 水平参考线（虚线效果：每隔一段画一小段）
+    if (tick.y > yBot+1 && tick.y < yTop-1) {
+      var refSteps = 30;
+      for (var rs = 0; rs < refSteps; rs += 2) {
+        var x1 = yAxisX + 4 + rs * (totalLen+24) / refSteps;
+        var x2 = yAxisX + 4 + (rs+1) * (totalLen+24) / refSteps;
+        if (x2 > xOff + totalLen + 8) break;
+        var refGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(x1, tick.y, yAxisZ),
+          new THREE.Vector3(x2, tick.y, yAxisZ)
+        ]);
+        scene.add(new THREE.Line(refGeo, new THREE.LineBasicMaterial({
+          color: tick.y < -0.5 ? 0x442222 : (tick.y > 0.5 ? 0x224422 : 0x333333),
+          transparent:true, opacity:0.15
+        })));
+        axisLines.push(scene.children[scene.children.length-1]);
+      }
+    }
+    // 标签
+    var yLabel = makeTextSprite(tick.label, '13px',
+      tick.y < -0.5 ? 'rgba(255,120,120,0.85)' : (tick.y > 0.5 ? 'rgba(120,255,150,0.85)' : 'rgba(200,200,220,0.7)'));
+    yLabel.position.set(yAxisX - 8, tick.y, yAxisZ);
+    scene.add(yLabel); dateLabels.push(yLabel);
+  }
+  // Y轴标题
+  var yTitleText = info.name + '(' + info.unit + ')';
+  var yTitle = makeTextSprite(yTitleText, '12px', 'rgba(180,200,255,0.6)');
+  yTitle.position.set(yAxisX - 8, yTop + 8, yAxisZ);
+  scene.add(yTitle); dateLabels.push(yTitle);
+
+  // --- 时间轴 (X轴) ---
+  var tStart = new THREE.Vector3(xOff, -5, zOff-8);
+  var tEnd = new THREE.Vector3(xOff+totalLen, -5, zOff-8);
+  scene.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([tStart,tEnd]),
+    new THREE.LineBasicMaterial({color:0x555577,transparent:true,opacity:0.6})
+  )); axisLines.push(scene.children[scene.children.length-1]);
+
+  // Date labels + 当日指标值
+  var labelStep = Math.max(1, Math.floor(nDays/12));
+  for (var dl = 0; dl < nDays; dl += labelStep) {
+    var xL = xOff + dl*daySpacing;
+    var tg = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(xL,-5,zOff-8), new THREE.Vector3(xL,-9,zOff-8)
+    ]);
+    var tk2 = new THREE.Line(tg, new THREE.LineBasicMaterial({color:0x666688,transparent:true,opacity:0.5}));
+    scene.add(tk2); axisLines.push(tk2);
+    var dRow = daily[dl];
+    var lblText = dRow._bucketStart ? dRow._bucketStart+'\n~ '+dRow.date_str : dRow.date_str;
+    // 加上当日指标值
+    var dVal = getMetricValue(dRow);
+    lblText += '\n' + fmtMetric(dVal);
+    var sp = makeTextSprite(lblText, '12px');
+    sp.position.set(xL, -14, zOff-10);
+    scene.add(sp); dateLabels.push(sp);
+  }
+
+  // --- 行业/分段轴 (Z轴) ---
+  var sStart = new THREE.Vector3(xOff-8,-5,zOff);
+  var sEnd = new THREE.Vector3(xOff-8,-5,zOff+totalWid);
+  scene.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([sStart,sEnd]),
+    new THREE.LineBasicMaterial({color:0x555577,transparent:true,opacity:0.6})
+  )); axisLines.push(scene.children[scene.children.length-1]);
+
+  for (var sl = 0; sl < nSegs; sl++) {
+    var zL = zOff + sl*segSpacing + segSpacing/2;
+    var lt = segLabels[sl] || ('S'+sl);
+    // avg indicator
+    if (cfg.viewmode !== 'single' && lt) {
+      var ss2 = 0, cc2 = 0;
+      for (var sv = 0; sv < nDays; sv++) {
+        var lk2 = lookup[daily[sv].date_str+'|'+segments[sl]];
+        if (lk2) { ss2 += getMetricValue(lk2); cc2++; }
+      }
+      if (cc2 > 0) lt += '\n'+fmtMetric(ss2/cc2);
+    }
+    var ssp = makeTextSprite(lt, '12px');
+    ssp.position.set(xOff-22,-5,zL);
+    scene.add(ssp); dateLabels.push(ssp);
+  }
+
+  // Grid
+  var gh = new THREE.GridHelper(Math.max(totalLen, totalWid)*1.5, 15, 0x222244, 0x111122);
+  gh.position.set(0,-10,0); scene.add(gh); axisLines.push(gh);
+
+  // Info panel
+  var iTxt = info.name + ' | ' + info.desc + ' | 颗粒度=' + (bucketSize>1?'~'+bucketSize+'日':'每日') + ' | ' + nDays + '点';
+  var isp = makeTextSprite(iTxt, '11px', 'rgba(180,200,255,0.7)');
+  isp.position.set(xOff+20, yTop+12, zOff+totalWid+12);
+  isp.scale.set(100,12,1);
+  scene.add(isp); dateLabels.push(isp);
+
+  updateLegend();
+  updateHUD(daily);
+  document.getElementById('loading').style.display='none';
+
+  // 同步剖面滑块范围
+  var spSlider = document.getElementById('spSlider');
+  if (spSlider) {
+    spSlider.max = Math.max(0, nDays - 1);
+    if (sectionIdx > nDays - 1) sectionIdx = Math.floor(nDays / 2);
+    spSlider.value = sectionIdx;
+  }
+  if (sectionEnabled) updateSection();
+  if (vixEnabled) updateVIX();
+}
+
+// ═══════════════════════════════════════════
+// PLAYHEAD (时间游标)
+// ═══════════════════════════════════════════
+function removePlayhead() {
+  if (playheadMesh) { scene.remove(playheadMesh); playheadMesh = null; }
+  if (playheadLine) { scene.remove(playheadLine); playheadLine = null; }
+  document.getElementById('playhead-info').style.display = 'none';
+}
+
+function showPlayhead(idx) {
+  if (!RIVER_META) return;
+  var M = RIVER_META;
+  if (idx < 0) idx = 0;
+  if (idx >= M.nDays) idx = M.nDays - 1;
+  removePlayhead();
+
+  var x = M.xOff + idx * M.daySpacing;
+
+  // Vertical plane (semi-transparent)
+  var ph = 80;
+  var verts = [
+    x,-5,M.zOff-3,  x,ph,M.zOff-3,  x,ph,M.zOff+M.totalWid+3,  x,-5,M.zOff+M.totalWid+3
+  ];
+  var pgeo = new THREE.BufferGeometry();
+  pgeo.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
+  var pidx = [0,1,2, 0,2,3];
+  pgeo.setIndex(pidx);
+  var pmat = new THREE.MeshBasicMaterial({color:0x66bbff,transparent:true,opacity:0.15,side:THREE.DoubleSide,depthWrite:false});
+  playheadMesh = new THREE.Mesh(pgeo, pmat);
+  scene.add(playheadMesh);
+
+  // Bright line on top
+  var topY = 50;
+  var lineGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(x,-5,M.zOff-3), new THREE.Vector3(x,topY,M.zOff-3),
+    new THREE.Vector3(x,topY,M.zOff+M.totalWid+3), new THREE.Vector3(x,-5,M.zOff+M.totalWid+3)
+  ]);
+  playheadLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({color:0x66bbff,transparent:true,opacity:0.8}));
+  scene.add(playheadLine);
+
+  // Info label
+  var row = M.daily[idx];
+  if (row) {
+    var info = document.getElementById('playhead-info');
+    info.style.display = 'block';
+    var txt = row._bucketStart ? row._bucketStart+' ~ '+row.date_str : row.date_str;
+    txt += '  |  ' + fmtMetric(getMetricValue(row));
+    info.textContent = txt;
+  }
+}
+
+// ═══════════════════════════════════════════
+// PLAYBACK
+// ═══════════════════════════════════════════
+function togglePlay() {
+  if (!RIVER_META) return;
+  playing = !playing;
+  var btn = document.getElementById('playBtn');
+  if (playing) {
+    btn.textContent = '⏸ 暂停';
+    btn.classList.add('active');
+    playTimer = setInterval(function() {
+      playheadIdx++;
+      if (playheadIdx >= RIVER_META.nDays) playheadIdx = 0;
+      showPlayhead(playheadIdx);
+    }, 200);
+  } else {
+    btn.textContent = '▶ 播放';
+    btn.classList.remove('active');
+    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  }
+}
+
+function stopPlay() {
+  if (playing) togglePlay();
+}
+
+// ═══════════════════════════════════════════
+// SPRITE / LEGEND / HUD
+// ═══════════════════════════════════════════
+function makeTextSprite(text, fontSize, color) {
+  var lines = text.split('\n');
+  var canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64 * lines.length;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = color || 'rgba(255,255,255,0.75)';
+  ctx.font = (fontSize||'14px')+' SF Mono, Monaco, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (var i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], canvas.width/2, (canvas.height/lines.length)*(i+0.5));
+  }
+  var tex = new THREE.CanvasTexture(canvas);
+  var mat = new THREE.SpriteMaterial({map:tex,transparent:true,opacity:0.85});
+  var sp = new THREE.Sprite(mat);
+  sp.scale.set(24, 6*lines.length, 1);
+  return sp;
+}
+
+function updateLegend() {
+  var el = document.getElementById('legend');
+  el.innerHTML = '';
+  var info = METRIC_INFO[cfg.metric];
+  var t = document.createElement('div');
+  t.className='legend-label'; t.style.marginBottom='5px'; t.style.fontSize='10px'; t.style.opacity='0.8';
+  t.innerText = info.name+' ('+info.unit+')';
+  el.appendChild(t);
+  var steps = 7;
+  for (var i = 0; i < steps; i++) {
+    var tv = i/(steps-1);
+    var val, c;
+    if (cfg.metric==='total_amount') { val=''; c=amtColor(Math.pow(10,tv*12),2e12); }
+    else if (cfg.metric==='up_pct') { val=(tv*100).toFixed(0)+'%'; c=upColor(tv); }
+    else if (cfg.metric==='std_ret') { val=(tv*6).toFixed(1)+'%'; c=volColor(tv*0.06); }
+    else if (cfg.metric==='mean_atv'||cfg.metric==='ind_atv') { val=((tv-0.5)*1.6).toFixed(2); c=atvColor((tv-0.5)*1.6); }
+    else { val=((tv-0.5)*10).toFixed(1)+'%'; c=retColor((tv-0.5)*0.1); }
+    var bar = document.createElement('div');
+    bar.className='legend-bar';
+    bar.style.background='rgb('+(c.r*255|0)+','+(c.g*255|0)+','+(c.b*255|0)+')';
+    el.appendChild(bar);
+    var lab = document.createElement('div');
+    lab.className='legend-label'; lab.innerText=val;
+    el.appendChild(lab);
+  }
+  var desc = document.createElement('div');
+  desc.className='legend-label'; desc.style.marginTop='6px'; desc.style.fontSize='9px'; desc.style.opacity='0.45';
+  desc.style.maxWidth='130px'; desc.style.lineHeight='1.3';
+  desc.innerText = info.desc;
+  el.appendChild(desc);
+}
+
+function updateHUD(daily) {
+  var info = METRIC_INFO[cfg.metric];
+  var sub = document.getElementById('hud-sub');
+  var bucketInfo = parseInt(cfg.granularity)>1 ? '~'+cfg.granularity+'日' : '每日';
+  sub.textContent = daily.length+' 个采样点('+bucketInfo+') · '+daily[0].date_str+' — '+daily[daily.length-1].date_str+' · '+info.name;
+}
+
+// ═══════════════════════════════════════════
+// HOVER: 高亮行业脊线 + 迷你时间序列图
+// ═══════════════════════════════════════════
+function removeHighlight() {
+  if (highlightLine) { scene.remove(highlightLine); highlightLine.geometry.dispose(); highlightLine.material.dispose(); highlightLine = null; }
+}
+
+function showHighlight(segIdx) {
+  if (!RIVER_META) return;
+  var M = RIVER_META;
+  if (segIdx < 0 || segIdx >= M.nSegs) return;
+  removeHighlight();
+
+  // 3D高亮线：该行业所有天的波浪高度连成脊线
+  var pts = [];
+  for (var d = 0; d < M.nDays; d++) {
+    var x = M.xOff + d * M.daySpacing;
+    var z = M.zOff + segIdx * M.segSpacing + M.segSpacing/2;
+    var y = M.heights[d][segIdx] + 1.5;
+    pts.push(new THREE.Vector3(x, y, z));
+  }
+  if (pts.length > 1) {
+    var geo = new THREE.BufferGeometry().setFromPoints(pts);
+    var mat = new THREE.LineBasicMaterial({ color:0xffff00, linewidth:3, transparent:true, opacity:0.9 });
+    highlightLine = new THREE.Line(geo, mat);
+    scene.add(highlightLine);
+  }
+}
+
+// ═══════════════════════════════════════════
+// SECTION TOOL: 剖面工具
+// ═══════════════════════════════════════════
+function removeSection() {
+  if (sectionPlane) { scene.remove(sectionPlane); sectionPlane.geometry.dispose(); sectionPlane.material.dispose(); sectionPlane = null; }
+  if (sectionBars) { scene.remove(sectionBars); sectionBars.geometry.dispose(); sectionBars.material.dispose(); sectionBars = null; }
+}
+
+function updateSection() {
+  if (!sectionEnabled || !RIVER_META) return;
+  removeSection();
+  var M = RIVER_META;
+  var idx = Math.min(sectionIdx, M.nDays - 1);
+  if (idx < 0) idx = 0;
+
+  // 1. 3D半透明切面
+  var x = M.xOff + idx * M.daySpacing;
+  var ph = 80;
+  var verts = [
+    x,-5,M.zOff-3,  x,ph,M.zOff-3,  x,ph,M.zOff+M.totalWid+3,  x,-5,M.zOff+M.totalWid+3
+  ];
+  var pgeo = new THREE.BufferGeometry();
+  pgeo.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
+  pgeo.setIndex([0,1,2, 0,2,3]);
+  var pmat = new THREE.MeshBasicMaterial({color:0xff6644,transparent:true,opacity:0.12,side:THREE.DoubleSide,depthWrite:false});
+  sectionPlane = new THREE.Mesh(pgeo, pmat);
+  scene.add(sectionPlane);
+
+  // 切面边框线
+  var edgeGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(x,-5,M.zOff-3), new THREE.Vector3(x,ph,M.zOff-3),
+    new THREE.Vector3(x,ph,M.zOff+M.totalWid+3), new THREE.Vector3(x,-5,M.zOff+M.totalWid+3),
+    new THREE.Vector3(x,-5,M.zOff-3)
+  ]);
+  var edgeLine = new THREE.Line(edgeGeo, new THREE.LineBasicMaterial({color:0xff8844,transparent:true,opacity:0.6}));
+  sectionPlane.add(edgeLine);
+
+  // 2. 3D柱状条：每个行业的值
+  var barW = M.segSpacing * 0.7;
+  var barPositions = [], barColors = [];
+  for (var s = 0; s < M.nSegs; s++) {
+    var z = M.zOff + s * M.segSpacing + M.segSpacing/2;
+    var val = M.crossMatrix[idx][s];
+    var colorVal = M.isHeatmap ? M.colorMatrix[idx][s] : val;
+    var h;
+    if (cfg.metric === 'amt_share') h = val*METRIC_INFO[cfg.metric].scale*cfg.heightScale;
+    else if (cfg.metric === 'total_amount') h = Math.log10(val+1)*28*cfg.heightScale;
+    else if (cfg.metric === 'up_pct') h = (val-0.5)*METRIC_INFO[cfg.metric].scale*cfg.heightScale;
+    else h = val * METRIC_INFO[cfg.metric].scale * cfg.heightScale;
+    // 4顶点矩形
+    var x1 = x - barW/2, x2 = x + barW/2;
+    var z1 = z - barW/2, z2 = z + barW/2;
+    barPositions.push(x1,0,z1, x2,0,z1, x2,h,z1, x1,h,z1);
+    barPositions.push(x1,0,z2, x2,0,z2, x2,h,z2, x1,h,z2);
+    barPositions.push(x1,0,z1, x1,0,z2, x1,h,z2, x1,h,z1);
+    barPositions.push(x2,0,z1, x2,0,z2, x2,h,z2, x2,h,z1);
+    barPositions.push(x1,h,z1, x2,h,z1, x2,h,z2, x1,h,z2);
+    var c = getMetricColor(colorVal);
+    for (var ci = 0; ci < 5; ci++) barColors.push(c.r,c.g,c.b, c.r,c.g,c.b, c.r,c.g,c.b, c.r,c.g,c.b);
+  }
+  var barIdx = [];
+  for (var bi = 0; bi < M.nSegs; bi++) {
+    var base = bi * 20; // 5 faces × 4 verts
+    for (var fi = 0; fi < 5; fi++) {
+      var o = base + fi*4;
+      barIdx.push(o,o+1,o+2, o,o+2,o+3);
+    }
+  }
+  var barGeo = new THREE.BufferGeometry();
+  barGeo.setAttribute('position', new THREE.Float32BufferAttribute(barPositions, 3));
+  barGeo.setAttribute('color', new THREE.Float32BufferAttribute(barColors, 3));
+  barGeo.setIndex(barIdx);
+  var barMat = new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,transparent:true,opacity:0.75});
+  sectionBars = new THREE.Mesh(barGeo, barMat);
+  scene.add(sectionBars);
+
+  // 3. 更新2D面板
+  drawSectionCanvas(idx);
+}
+
+function drawSectionCanvas(idx) {
+  var M = RIVER_META;
+  if (!M) return;
+  var canvas = document.getElementById('spCanvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = 'rgba(8,8,16,0.6)';
+  ctx.fillRect(0,0,W,H);
+
+  var row = M.daily[idx];
+  var dateLabel = row._bucketStart ? row._bucketStart+'~'+row.date_str : row.date_str;
+  var el = document.getElementById('spDate');
+  if (el) el.textContent = dateLabel;
+
+  // 收集数据并排序
+  var items = [];
+  for (var s = 0; s < M.nSegs; s++) {
+    var name = M.segments ? M.segments[s] : 'S'+s;
+    if (name === '全市场L' || name === '全市场R') continue;
+    items.push({ name:name, val: M.crossMatrix[idx][s], idx:s });
+  }
+  items.sort(function(a,b){ return b.val - a.val; });
+
+  // Y轴范围
+  var vals = items.map(function(d){return d.val;});
+  var yMax = Math.max.apply(null, vals);
+  var yMin = Math.min.apply(null, vals);
+  var yPad = (yMax - yMin) * 0.2 || Math.abs(yMax)*0.1 || 0.001;
+  yMax += yPad; yMin -= yPad;
+  if (cfg.metric !== 'total_amount' && cfg.metric !== 'up_pct' && yMin > 0) yMin = 0;
+
+  // 全市场基准
+  var mktVal = getMetricValue(row);
+
+  var padL = 65, padR = 8, padT = 8, padB = 6;
+  var barH = (H - padT - padB) / items.length;
+  var chartW = W - padL - padR;
+  var zeroX = padL + (0 - yMin) / (yMax - yMin) * chartW;
+
+  // 全市场基准虚线
+  var mktX = padL + (mktVal - yMin) / (yMax - yMin) * chartW;
+  ctx.strokeStyle = 'rgba(150,150,200,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(mktX, padT); ctx.lineTo(mktX, H-padB); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(150,150,200,0.4)'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('市场', mktX, padT - 1);
+
+  // 零线
+  if (yMin < 0 && yMax > 0 && cfg.metric !== 'total_amount') {
+    ctx.strokeStyle = 'rgba(128,128,128,0.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(zeroX, padT); ctx.lineTo(zeroX, H-padB); ctx.stroke();
+  }
+
+  // 画每个行业的bar
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var y = padT + i * barH;
+    var valX = padL + (it.val - yMin) / (yMax - yMin) * chartW;
+    var x1, x2;
+    if (cfg.metric !== 'total_amount' && it.val >= 0) { x1 = zeroX; x2 = valX; }
+    else if (cfg.metric !== 'total_amount') { x1 = valX; x2 = zeroX; }
+    else { x1 = padL; x2 = valX; }
+
+    var c = getMetricColor(it.val);
+    ctx.fillStyle = 'rgba('+(c.r*255|0)+','+(c.g*255|0)+','+(c.b*255|0)+',0.85)';
+    ctx.fillRect(x1, y+1, x2-x1, barH-2);
+
+    // 行业名
+    ctx.fillStyle = 'rgba(220,220,240,0.8)'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(it.name.length > 5 ? it.name.slice(0,5) : it.name, padL - 4, y + barH/2 + 3);
+
+    // 数值
+    ctx.fillStyle = 'rgba(180,200,255,0.7)'; ctx.textAlign = 'left';
+    ctx.fillText(fmtMetric(it.val), Math.max(x2+2, padL+chartW-50), y + barH/2 + 3);
+  }
+
+  // 标题
+  var info = METRIC_INFO[cfg.metric];
+  ctx.fillStyle = '#6bf'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
+  ctx.fillText(info.name + ' · ' + items.length + '行业', padL, padT - 1);
+}
+
+// ═══════════════════════════════════════════
+// VIX OVERLAY: 已实现波动率(20日滚动年化)
+// ═══════════════════════════════════════════
+function removeVIX() {
+  if (vixLine) { scene.remove(vixLine); vixLine.geometry.dispose(); vixLine.material.dispose(); vixLine = null; }
+  if (vixArea) { scene.remove(vixArea); vixArea.geometry.dispose(); vixArea.material.dispose(); vixArea = null; }
+}
+
+function updateVIX() {
+  if (!vixEnabled || !RIVER_META) { removeVIX(); return; }
+  removeVIX();
+  var M = RIVER_META;
+  var daily = M.daily;
+
+  // 1. 计算原始日收益率序列（从mean_ret还原，resample后取bucket均值）
+  // 但resample后daily已经被聚合，需要用原始数据重算
+  // 这里直接用daily的mean_ret作为日收益率序列
+  var rawRets = [];
+  for (var i = 0; i < daily.length; i++) {
+    rawRets.push(daily[i].mean_ret != null ? daily[i].mean_ret : 0);
+  }
+
+  // 2. 20日滚动标准差，年化（×√252）
+  var window = 20;
+  var vixVals = [];
+  for (var i = 0; i < rawRets.length; i++) {
+    if (i < window - 1) { vixVals.push(null); continue; }
+    var sum = 0, cnt = 0;
+    for (var j = i - window + 1; j <= i; j++) { sum += rawRets[j]; cnt++; }
+    var mean = sum / cnt;
+    var varSum = 0;
+    for (var k = i - window + 1; k <= i; k++) { varSum += (rawRets[k] - mean) * (rawRets[k] - mean); }
+    var std = Math.sqrt(varSum / cnt);
+    var annualized = std * Math.sqrt(252) * 100; // 百分数
+    vixVals.push(annualized);
+  }
+
+  // 3. 找有效范围
+  var valid = [];
+  for (var v = 0; v < vixVals.length; v++) { if (vixVals[v] != null) valid.push(vixVals[v]); }
+  if (valid.length < 2) return;
+  var vMin = Math.min.apply(null, valid);
+  var vMax = Math.max.apply(null, valid);
+
+  // 4. 映射到3D空间：VIX线画在河流前方（z更小），高度按vMax映射到波浪上方
+  var vixScale = 120 / Math.max(vMax, 1); // 缩放到~120单位高
+  var vixZ = M.zOff - 15; // 河流前方
+  var pts = [], fillPts = [];
+
+  for (var d = 0; d < M.nDays; d++) {
+    var x = M.xOff + d * M.daySpacing;
+    var vv = vixVals[d];
+    if (vv == null) continue;
+    var y = vv * vixScale;
+    pts.push(new THREE.Vector3(x, y, vixZ));
+    fillPts.push(new THREE.Vector3(x, y, vixZ));
+  }
+  // 填充面底边
+  var nFill = fillPts.length;
+  for (var d2 = nFill - 1; d2 >= 0; d2--) {
+    fillPts.push(new THREE.Vector3(fillPts[d2].x, -5, vixZ));
+  }
+
+  // VIX折线
+  if (pts.length > 1) {
+    var geo = new THREE.BufferGeometry().setFromPoints(pts);
+    var mat = new THREE.LineBasicMaterial({ color: 0xff8800, linewidth: 3, transparent: true, opacity: 0.9 });
+    vixLine = new THREE.Line(geo, mat);
+    scene.add(vixLine);
+  }
+
+  // VIX填充面（半透明橙色）
+  if (fillPts.length > 3) {
+    var fGeo = new THREE.BufferGeometry();
+    var fPos = [];
+    for (var f = 0; f < fillPts.length; f++) fPos.push(fillPts[f].x, fillPts[f].y, fillPts[f].z);
+    fGeo.setAttribute('position', new THREE.Float32BufferAttribute(fPos, 3));
+    // 简单三角扇
+    var fIdx = [];
+    for (var fi = 0; fi < nFill - 1; fi++) {
+      fIdx.push(fi, fi + 1, 2*nFill - 1 - fi);
+      fIdx.push(fi + 1, 2*nFill - 2 - fi, 2*nFill - 1 - fi);
+    }
+    fGeo.setIndex(fIdx);
+    var fMat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
+    vixArea = new THREE.Mesh(fGeo, fMat);
+    scene.add(vixArea);
+  }
+
+  // VIX标签（最大/最小/当前）
+  var peakVi = valid.indexOf(vMax);
+  var troughVi = valid.indexOf(vMin);
+  if (peakVi >= 0) {
+    var peakX = M.xOff + peakVi * M.daySpacing;
+    var peakY = vMax * vixScale + 5;
+    var lbl = makeTextSprite('VIX高 ' + vMax.toFixed(0) + '%', '12px', 'rgba(255,136,0,0.9)');
+    lbl.position.set(peakX, peakY, vixZ);
+    scene.add(lbl); dateLabels.push(lbl);
+  }
+  // 标题
+  var lastV = valid[valid.length - 1];
+  var title = makeTextSprite('已实现波动率(20日年化) 当前:' + lastV.toFixed(1) + '%', '11px', 'rgba(255,170,50,0.7)');
+  title.position.set(M.xOff + 20, vMax * vixScale + 15, vixZ);
+  title.scale.set(100, 8, 1);
+  scene.add(title); dateLabels.push(title);
+}
+
+
+function onResize() {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onMouseMove(event) {
+  mouse.x = (event.clientX/window.innerWidth)*2-1;
+  mouse.y = -(event.clientY/window.innerHeight)*2+1;
+  if (!riverMesh || !DATA || !RIVER_META) return;
+  raycaster.setFromCamera(mouse, camera);
+  var hits = raycaster.intersectObject(riverMesh);
+  var tt = document.getElementById('tooltip');
+  if (hits.length > 0) {
+    var face = hits[0].face;
+    var a = face.a, b = face.b, c = face.c;
+    // 三个顶点属于哪些day和segment
+    var segIdx = Math.round((a % RIVER_META.nSegs + b % RIVER_META.nSegs + c % RIVER_META.nSegs) / 3);
+    var dayIdx = Math.floor(((Math.floor(a/RIVER_META.nSegs)) + (Math.floor(b/RIVER_META.nSegs)) + (Math.floor(c/RIVER_META.nSegs))) / 3);
+    if (dayIdx < 0) dayIdx = 0;
+    if (dayIdx >= RIVER_META.daily.length) dayIdx = RIVER_META.daily.length-1;
+    if (segIdx < 0) segIdx = 0;
+    if (segIdx >= RIVER_META.nSegs) segIdx = RIVER_META.nSegs-1;
+
+    // 高亮该行业脊线
+    showHighlight(segIdx);
+    tt.style.left = (event.clientX + 15) + 'px';
+    tt.style.top = (event.clientY + 15) + 'px';
+
+    var row = RIVER_META.daily[dayIdx];
+    if (row) {
+      tt.style.display='block';
+      var info = METRIC_INFO[cfg.metric];
+
+      // 日期标题
+      var dateTxt = row.date_str;
+      if (row._bucketStart && row._bucketStart !== row.date_str)
+        dateTxt = row._bucketStart + ' ~ ' + row.date_str;
+      var html = '<div class="tt-date">' + dateTxt + '</div>';
+
+      // 当前hover的具体行业/分段
+      if (RIVER_META.segments && RIVER_META.segments[segIdx]) {
+        var segName = RIVER_META.segments[segIdx];
+        // 清理 "全市场L/R" 标签
+        if (segName === '全市场L' || segName === '全市场R') segName = '全市场';
+        html += '<div class="tt-row" style="border-bottom:1px solid rgba(255,255,255,0.15);padding-bottom:4px;margin-bottom:4px;"><span>板块</span><span class="tt-val">' + segName + '</span></div>';
+      }
+
+      // 该交叉点的指标值
+      var crossVal = RIVER_META.crossMatrix && RIVER_META.crossMatrix[dayIdx] ? RIVER_META.crossMatrix[dayIdx][segIdx] : null;
+      if (crossVal != null) {
+        html += '<div class="tt-row"><span style="color:#6bf">' + info.name + '</span><span class="tt-val">' + fmtMetric(crossVal) + '</span></div>';
+      } else {
+        html += '<div class="tt-row"><span>' + info.name + '(全市场)</span><span class="tt-val">' + fmtMetric(getMetricValue(row)) + '</span></div>';
+      }
+
+      // 全市场对比值
+      if (crossVal != null) {
+        var mktVal = getMetricValue(row);
+        var diff = crossVal - mktVal;
+        var diffTxt = (diff>=0?'+':'') + (cfg.metric==='total_amount' ? (diff/1e8).toFixed(0)+'亿' : (diff*100).toFixed(2)+'%');
+        html += '<div class="tt-row"><span>vs全市场</span><span class="tt-val" style="color:'+(diff>=0?'#6f6':'#f66')+'">' + diffTxt + '</span></div>';
+        html += '<div class="tt-row"><span>全市场均值</span><span class="tt-val" style="opacity:0.6">' + fmtMetric(mktVal) + '</span></div>';
+      }
+
+      // 附加信息
+      html += '<div class="tt-row"><span>上涨/下跌</span><span class="tt-val">' + (row.n_up||0) + ' / ' + (row.n_down||0) + '</span></div>';
+      html += '<div class="tt-row"><span>交易股票</span><span class="tt-val">' + (row.n_stocks||'-') + '</span></div>';
+
+      // 该点的3D坐标高度
+      if (RIVER_META.heights && RIVER_META.heights[dayIdx] && RIVER_META.heights[dayIdx][segIdx] != null) {
+        var h = RIVER_META.heights[dayIdx][segIdx];
+        html += '<div class="tt-row" style="opacity:0.4"><span>波浪高度</span><span class="tt-val">' + h.toFixed(1) + '</span></div>';
+      }
+
+      tt.innerHTML = html;
+    }
+  } else {
+    tt.style.display='none';
+    removeHighlight();
+  }
+}
+
+// 鼠标离开canvas时也清除
+function onMouseLeave() {
+  document.getElementById('tooltip').style.display='none';
+  removeHighlight();
+}
+
+// ═══════════════════════════════════════════
+// ANIMATE
+// ═══════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  if (autoRotate) {
+    var t = Date.now()*0.0001;
+    camera.position.x = Math.cos(t)*350;
+    camera.position.z = Math.sin(t)*350;
+    camera.lookAt(0,0,0);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ═══════════════════════════════════════════
+// START
+// ═══════════════════════════════════════════
+function start() {
+  try {
+    if (typeof THREE === 'undefined') { showError('THREE.js未加载!'); return; }
+    init();
+  } catch(e) { showError('初始化失败: '+e.message); return; }
+
+  fetch('data.json')
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(data) {
+      DATA = data;
+      // Init date pickers
+      var firstDay = DATA.daily[0].date_str;
+      var lastDay = DATA.daily[DATA.daily.length-1].date_str;
+      cfg.dateStart = firstDay;
+      cfg.dateEnd = lastDay;
+      document.getElementById('dateStart').value = firstDay;
+      document.getElementById('dateStart').min = firstDay;
+      document.getElementById('dateStart').max = lastDay;
+      document.getElementById('dateEnd').value = lastDay;
+      document.getElementById('dateEnd').min = firstDay;
+      document.getElementById('dateEnd').max = lastDay;
+
+      buildRiver();
+      animate();
+    })
+    .catch(function(err) { showError('数据加载失败: '+err.message); });
+
+  // Event listeners
+  document.getElementById('metric').addEventListener('change', function(e) {
+    cfg.metric = e.target.value; stopPlay(); buildRiver();
+    if (sectionEnabled) updateSection();
+  });
+  document.getElementById('viewmode').addEventListener('change', function(e) {
+    cfg.viewmode = e.target.value; stopPlay(); buildRiver();
+  });
+  document.getElementById('granularity').addEventListener('change', function(e) {
+    cfg.granularity = parseInt(e.target.value); stopPlay(); playheadIdx=0; buildRiver();
+  });
+  document.getElementById('smooth').addEventListener('change', function(e) {
+    cfg.smooth = parseInt(e.target.value); buildRiver();
+  });
+  document.getElementById('dateStart').addEventListener('change', function(e) {
+    cfg.dateStart = e.target.value; stopPlay(); playheadIdx=0; buildRiver();
+  });
+  document.getElementById('dateEnd').addEventListener('change', function(e) {
+    cfg.dateEnd = e.target.value; stopPlay(); playheadIdx=0; buildRiver();
+  });
+  document.getElementById('heightScale').addEventListener('input', function(e) {
+    cfg.heightScale = parseFloat(e.target.value);
+    document.getElementById('heightVal').textContent = cfg.heightScale.toFixed(1)+'×';
+    buildRiver();
+  });
+  document.getElementById('playBtn').addEventListener('click', togglePlay);
+  document.getElementById('camReset').addEventListener('click', function() {
+    camera.position.set(0,160,300);
+    controls.target.set(0,0,0);
+    controls.update();
+  });
+  document.getElementById('autoRot').addEventListener('click', function(e) {
+    autoRotate = !autoRotate;
+    e.target.classList.toggle('active');
+    e.target.innerText = autoRotate ? '停止' : '自动';
+  });
+  document.getElementById('quickRange').addEventListener('change', function(e) {
+    var v = e.target.value;
+    if (!v) return;
+    if (v === 'all') {
+      cfg.dateStart = DATA.daily[0].date_str;
+      cfg.dateEnd = DATA.daily[DATA.daily.length-1].date_str;
+    } else {
+      var parts = v.split(',');
+      cfg.dateStart = parts[0];
+      cfg.dateEnd = parts[1];
+    }
+    document.getElementById('dateStart').value = cfg.dateStart;
+    document.getElementById('dateEnd').value = cfg.dateEnd;
+    stopPlay(); playheadIdx = 0; buildRiver();
+  });
+
+  // Section tool events
+  document.getElementById('spToggle').addEventListener('click', function(e) {
+    sectionEnabled = !sectionEnabled;
+    e.target.textContent = sectionEnabled ? '关闭' : '开启';
+    e.target.classList.toggle('active', sectionEnabled);
+    document.getElementById('spBody').style.display = sectionEnabled ? 'block' : 'none';
+    if (sectionEnabled) updateSection(); else removeSection();
+  });
+  document.getElementById('spSlider').addEventListener('input', function(e) {
+    sectionIdx = parseInt(e.target.value);
+    if (sectionEnabled) updateSection();
+  });
+
+  // Click on river to set section position
+  renderer.domElement.addEventListener('click', function(event) {
+    if (!sectionEnabled || !riverMesh || !RIVER_META) return;
+    mouse.x = (event.clientX/window.innerWidth)*2-1;
+    mouse.y = -(event.clientY/window.innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    var hits = raycaster.intersectObject(riverMesh);
+    if (hits.length > 0) {
+      var idx = hits[0].face.a;
+      var dayIdx = Math.floor(idx / RIVER_META.nSegs);
+      sectionIdx = Math.max(0, Math.min(dayIdx, RIVER_META.nDays-1));
+      document.getElementById('spSlider').value = sectionIdx;
+      updateSection();
+    }
+  });
+
+  // VIX toggle
+  document.getElementById('vixToggle').addEventListener('click', function(e) {
+    vixEnabled = !vixEnabled;
+    e.target.textContent = vixEnabled ? '关闭' : '开启';
+    e.target.classList.toggle('active', vixEnabled);
+    if (vixEnabled) updateVIX(); else removeVIX();
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', start);
+} else { start(); }
+</script>
+</body>
+</html>

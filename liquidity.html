@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>A股场内外流动性 — Liquidity Flow</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0a0a14; color:#cdd; font-family:'Segoe UI',system-ui,sans-serif;
+  overflow-x:hidden;
+}
+.nav { position:fixed; top:0; left:0; right:0; height:36px;
+  background:rgba(15,15,30,0.95); display:flex; align-items:center; padding:0 12px;
+  z-index:100; border-bottom:1px solid #333; gap:2px; overflow-x:auto; }
+.nav a { color:#778; text-decoration:none; font-size:11px; padding:4px 8px;
+  border-radius:4px; white-space:nowrap; transition:.2s; }
+.nav a:hover { color:#cef; background:rgba(255,255,255,0.08); }
+.nav a.active { color:#5cf; background:rgba(80,160,255,0.12); }
+.nav .sep { color:#445; margin:0 2px; }
+
+h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0; letter-spacing:1px; }
+.subtitle { text-align:center; font-size:10px; color:#667; margin-bottom:4px; }
+
+.panel { background:rgba(20,20,40,0.6); border:1px solid #2a2a4a;
+  border-radius:8px; margin:6px; padding:8px; }
+.panel-title { font-size:12px; color:#8cf; margin-bottom:6px;
+  border-bottom:1px solid #334; padding-bottom:3px; }
+.panel-title .hint { font-size:9px; color:#567; font-weight:normal; }
+
+.layout { margin-top:42px; padding:4px; display:grid;
+  grid-template-columns: 1fr 1fr; gap:6px; max-width:1700px; }
+.layout > .panel:nth-child(1) { grid-column:1/3; }
+.layout > .panel:nth-child(4) { grid-column:1/3; }
+.layout > .panel:nth-child(6) { grid-column:1/3; }
+.layout > .panel:nth-child(8) { grid-column:1/3; }
+.layout > .panel:nth-child(10) { grid-column:1/3; }
+
+canvas { display:block; width:100%; }
+#overviewCanvas { height:320px; cursor:crosshair; }
+#marginCanvas { height:200px; cursor:crosshair; }
+#northCanvas { height:200px; cursor:crosshair; }
+#rateCanvas { height:200px; cursor:crosshair; }
+#corrCanvas { height:200px; cursor:crosshair; }
+#macroCanvas { height:220px; cursor:crosshair; }
+#bondSpreadCanvas { height:200px; cursor:crosshair; }
+#yieldCurveCanvas { height:200px; cursor:crosshair; }
+
+.ctrl { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; font-size:11px; }
+.ctrl label { color:#889; }
+.ctrl select, .ctrl button {
+  background:#222; color:#ccd; border:1px solid #345; border-radius:4px;
+  padding:3px 8px; font-size:11px; cursor:pointer;
+}
+.ctrl button:hover { background:#335; }
+.ctrl button.active { background:#246; color:#cef; }
+
+.tooltip { position:fixed; pointer-events:none; background:rgba(10,10,20,0.95);
+  border:1px solid #558; border-radius:4px; padding:4px 8px; font-size:11px;
+  color:#cef; z-index:200; display:none; white-space:nowrap; }
+
+.legend { display:flex; gap:10px; margin:4px 0; flex-wrap:wrap; font-size:10px; }
+.legend span { display:flex; align-items:center; gap:3px; cursor:pointer; }
+.legend i { width:12px; height:3px; border-radius:1px; display:inline-block; }
+.legend .dot { width:8px; height:8px; border-radius:50%; }
+
+.gauge { display:inline-block; text-align:center; margin:0 6px; }
+.gauge .val { font-size:20px; font-weight:bold; }
+.gauge .lbl { font-size:9px; color:#778; }
+.gauge .delta { font-size:9px; }
+
+.info-box { background:rgba(10,30,50,0.4); border-left:3px solid #47a;
+  padding:6px 10px; margin:6px 0; font-size:10px; color:#8ac; line-height:1.5; }
+.info-box b { color:#ace; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="index.html">3D波浪</a>
+  <a href="streamgraph.html">资金流向</a>
+  <a href="sankey.html">桑基迁移</a>
+  <a href="dashboard.html">仪表盘</a>
+  <a href="calendar.html">日历热力</a>
+  <a href="state.html">温度计</a>
+  <a href="phase.html">相空间</a>
+  <span class="sep">|</span>
+  <a href="marketstates.html">市场状态</a>
+  <a href="marketscore.html">市场评分</a>
+  <a href="liquidity.html" class="active">流动性</a>
+</div>
+
+<div style="margin-top:42px">
+  <h1>A股场内外流动性分析</h1>
+  <div class="subtitle">成交额 · 两融 · 北向 · SHIBOR · M2/社融 · 中美国债 · 外汇储备</div>
+</div>
+
+<div class="layout">
+
+<!-- 总览: 多层叠加 -->
+<div class="panel">
+  <div class="panel-title">流动性总览 <span class="hint">（成交额=面积，两融余额=黄线，北向累计=青线，归一化叠加）</span></div>
+  <canvas id="overviewCanvas"></canvas>
+  <div class="legend">
+    <span><i style="background:#4fc3f7"></i>成交额</span>
+    <span><i style="background:#ffd54f"></i>融资余额</span>
+    <span><i style="background:#4db6ac"></i>北向累计净流入</span>
+    <span><i style="background:rgba(255,100,100,0.5)"></i>成交额Z>2区域</span>
+  </div>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="overviewRange">
+      <option value="0">全部(2015-2026)</option>
+      <option value="500">最近500天</option>
+      <option value="250" selected>最近250天</option>
+      <option value="60">最近60天</option>
+    </select>
+    <span style="margin-left:8px;color:#889;font-size:10px" id="overviewHover">悬停查看详情</span>
+  </div>
+</div>
+
+<!-- 两融 -->
+<div class="panel">
+  <div class="panel-title">两融余额与杠杆 <span class="hint">（融资余额走势 + 日变化）</span></div>
+  <canvas id="marginCanvas"></canvas>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="marginRange">
+      <option value="0">全部</option>
+      <option value="250" selected>最近250天</option>
+      <option value="60">最近60天</option>
+    </select>
+  </div>
+</div>
+
+<!-- 北向资金 -->
+<div class="panel">
+  <div class="panel-title">北向资金 <span class="hint">（日净流入 + 5日均 + 累计）</span></div>
+  <canvas id="northCanvas"></canvas>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="northRange">
+      <option value="0">全部</option>
+      <option value="250" selected>最近250天</option>
+      <option value="60">最近60天</option>
+    </select>
+  </div>
+</div>
+
+<!-- 利率 -->
+<div class="panel">
+  <div class="panel-title">利率体系 <span class="hint">（SHIBOR隔夜/3M + 期限利差）</span></div>
+  <canvas id="rateCanvas"></canvas>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="rateRange">
+      <option value="0">全部</option>
+      <option value="250" selected>最近250天</option>
+      <option value="60">最近60天</option>
+    </select>
+    <label style="margin-left:8px;">指标:</label>
+    <select id="rateMetric">
+      <option value="level">利率水平</option>
+      <option value="spread">期限利差</option>
+    </select>
+  </div>
+</div>
+
+<!-- 相关性矩阵 -->
+<div class="panel">
+  <div class="panel-title">宏观流动性 <span class="hint">（M2/M1同比 + 剪刀差 + 社融增量）</span></div>
+  <canvas id="macroCanvas"></canvas>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="macroRange">
+      <option value="0">全部(2008-2026)</option>
+      <option value="750">最近3年</option>
+      <option value="500" selected>最近2年</option>
+      <option value="250">最近1年</option>
+    </select>
+    <label style="margin-left:8px;">指标:</label>
+    <select id="macroMetric">
+      <option value="m2_m1" selected>M2/M1同比+剪刀差</option>
+      <option value="social">社融增量</option>
+      <option value="forex">外汇储备</option>
+    </select>
+  </div>
+</div>
+
+<!-- 中美利差 -->
+<div class="panel">
+  <div class="panel-title">中美利差 <span class="hint">（10Y/2Y利差走势，负值=资本外流压力）</span></div>
+  <canvas id="bondSpreadCanvas"></canvas>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="bondSpreadRange">
+      <option value="0">全部(2020-2026)</option>
+      <option value="500" selected>最近500天</option>
+      <option value="250">最近250天</option>
+    </select>
+    <span style="margin-left:8px;color:#889;font-size:10px" id="bondSpreadHover">悬停查看详情</span>
+  </div>
+</div>
+
+<!-- 收益率曲线 -->
+<div class="panel">
+  <div class="panel-title">国债收益率曲线 <span class="hint">（中美2Y/5Y/10Y/30Y，看曲线形态变化）</span></div>
+  <canvas id="yieldCurveCanvas"></canvas>
+  <div class="ctrl">
+    <label>范围:</label>
+    <select id="yieldRange">
+      <option value="0">全部(2020-2026)</option>
+      <option value="500" selected>最近500天</option>
+      <option value="250">最近250天</option>
+    </select>
+    <label style="margin-left:8px;">国家:</label>
+    <select id="yieldCountry">
+      <option value="both" selected>中美对比</option>
+      <option value="cn">仅中国</option>
+      <option value="us">仅美国</option>
+    </select>
+  </div>
+</div>
+
+<!-- 相关性矩阵 -->
+<div class="panel">
+  <div class="panel-title">流动性交叉相关性 <span class="hint">（各资金流的领先滞后关系）</span></div>
+  <canvas id="corrCanvas"></canvas>
+  <div class="ctrl">
+    <label>窗口:</label>
+    <select id="corrWindow">
+      <option value="20">20日</option>
+      <option value="60" selected>60日</option>
+      <option value="120">120日</option>
+    </select>
+    <label style="margin-left:8px;">指标对:</label>
+    <select id="corrPair">
+      <option value="amt_north">成交额 vs 北向</option>
+      <option value="amt_margin">成交额 vs 两融</option>
+      <option value="north_margin" selected>北向 vs 两融</option>
+      <option value="rate_amt">SHIBOR vs 成交额</option>
+      <option value="rate_north">SHIBOR vs 北向</option>
+    </select>
+    <span style="margin-left:8px;color:#889;font-size:10px">暖色=正相关, 冷色=负相关</span>
+  </div>
+</div>
+
+</div>
+
+<div class="panel" style="margin:8px;max-width:1700px">
+  <div class="panel-title">怎么看流动性</div>
+  <div class="info-box">
+    <b>场内资金（红色系）</b>：成交额=股市造血能力，两融余额=杠杆资金，北向=外资smart money。<br>
+    <b>场外资金（蓝色系）</b>：SHIBOR=银行间松紧，M2/社融=宏观放水力度，外汇储备=外部约束。<br>
+    <b>跨境资金（紫色系）</b>：中美利差是资本流动的核心驱动。利差倒挂(负值)=资本外流压力→利空A股。<br>
+    <b>关键信号</b>：①成交额+两融+北向三线齐升=资金共振进场 ②M1-M2剪刀差转正=资金活化→利好 ③社融超预期=信用扩张→领先股市1-2季度<br>
+    <b>背离信号</b>：成交额放大但两融下降=散户放量机构撤退；北向流出但成交放大=内资接盘；中美利差转负+北向大幅流出=外资真撤离。
+  </div>
+</div>
+
+<div class="tooltip" id="tip"></div>
+
+<script>
+var DATA = null;
+
+fetch('liquidity.json?_=' + Date.now())
+.then(r => r.json())
+.then(d => { DATA = d; init(); })
+.catch(e => { document.body.innerHTML += '<div style="color:#f88;padding:20px">加载失败: '+e+'</div>'; });
+
+function init() {
+  drawOverview();
+  drawMargin();
+  drawNorth();
+  drawRate();
+  drawMacro();
+  drawBondSpread();
+  drawYieldCurve();
+  drawCorr();
+  bindControls();
+  window.addEventListener('resize', function() {
+    drawOverview(); drawMargin(); drawNorth(); drawRate();
+    drawMacro(); drawBondSpread(); drawYieldCurve(); drawCorr();
+  });
+}
+
+function fmtDate(d) { return d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8); }
+function fmtDateShort(d) { return d.substring(0,4)+d.substring(4,6); }
+function fmtAmt(v) {
+  if (!v && v !== 0) return '—';
+  if (Math.abs(v) >= 1e12) return (v/1e12).toFixed(2)+'万亿';
+  if (Math.abs(v) >= 1e8) return (v/1e8).toFixed(1)+'亿';
+  if (Math.abs(v) >= 1e4) return (v/1e4).toFixed(1)+'万';
+  return v.toFixed(0);
+}
+
+function getRange(data, sel) {
+  var val = parseInt(document.getElementById(sel).value);
+  return val > 0 ? data.slice(-val) : data;
+}
+
+function setupCanvas(id) {
+  var canvas = document.getElementById(id);
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  return { ctx:ctx, W:rect.width, H:rect.height };
+}
+
+// ═══════════════════════════════════
+// 总览: 归一化叠加图
+// ═══════════════════════════════════
+function drawOverview() {
+  var c = setupCanvas('overviewCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'overviewRange');
+  var n = data.length;
+  var padL = 50, padR = 50, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+
+  // 归一化各序列到[0,1]
+  function normalize(key) {
+    var vals = data.map(function(d) { return d[key] || 0; });
+    var mx = Math.max.apply(null, vals), mn = Math.min.apply(null, vals);
+    var range = mx - mn || 1;
+    return vals.map(function(v) { return (v - mn) / range; });
+  }
+  var amtN = normalize('total_amount');
+  var marN = data.map(function(d) {
+    var v = d.margin_balance || 0; return v;
+  });
+  // 两融可能有很多0值(早期无数据), 只归一化非零段
+  var marVals = marN.filter(function(v){return v>0;});
+  var marMax = Math.max.apply(null, marVals.length ? marVals : [1]);
+  var marMin = Math.min.apply(null, marVals.length ? marVals : [0]);
+  marN = marN.map(function(v) { return v > 0 ? (v - marMin)/(marMax-marMin||1) : null; });
+  var northN = normalize('north_cum');
+
+  // 成交额面积
+  ctx.fillStyle = 'rgba(79,195,247,0.15)';
+  ctx.beginPath();
+  ctx.moveTo(padL, padT + plotH);
+  for (var i = 0; i < n; i++) {
+    ctx.lineTo(padL + (i/(n-1))*plotW, padT + plotH - amtN[i]*plotH);
+  }
+  ctx.lineTo(padL + plotW, padT + plotH);
+  ctx.fill();
+
+  // 成交额Z>2区域高亮
+  for (var i = 0; i < n; i++) {
+    var z = data[i].amt_z || 0;
+    if (z > 2) {
+      var x = padL + (i/(n-1))*plotW;
+      ctx.fillStyle = 'rgba(255,100,100,0.08)';
+      ctx.fillRect(x - 1, padT, 3, plotH);
+    }
+  }
+
+  // 成交额线
+  function drawLine(vals, color, lw) {
+    ctx.strokeStyle = color; ctx.lineWidth = lw || 1.5;
+    ctx.beginPath();
+    var started = false;
+    for (var i = 0; i < n; i++) {
+      if (vals[i] === null || vals[i] === undefined) continue;
+      var x = padL + (i/(n-1))*plotW;
+      var y = padT + plotH - vals[i]*plotH;
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  drawLine(amtN, '#4fc3f7', 1);
+  drawLine(marN, '#ffd54f', 2);
+  drawLine(northN, '#4db6ac', 2);
+
+  // 右侧Y轴: 当前值
+  ctx.font = '10px sans-serif';
+  // 成交额
+  var lastAmt = data[n-1].total_amount || 0;
+  ctx.fillStyle = '#4fc3f7'; ctx.textAlign = 'left';
+  ctx.fillText(fmtAmt(lastAmt), W - padR + 4, padT + 10);
+  // 两融
+  var lastMar = data[n-1].margin_balance || 0;
+  if (lastMar > 0) {
+    ctx.fillStyle = '#ffd54f';
+    ctx.fillText(fmtAmt(lastMar), W - padR + 4, padT + 24);
+  }
+  // 北向
+  var lastNorth = data[n-1].north_cum || 0;
+  ctx.fillStyle = '#4db6ac';
+  ctx.fillText(fmtAmt(lastNorth), W - padR + 4, padT + 38);
+
+  // X轴
+  ctx.fillStyle = '#778'; ctx.textAlign = 'center';
+  var step = Math.ceil(n / 10);
+  for (var i = 0; i < n; i += step) {
+    ctx.fillText(data[i].date.substring(0,4), padL + (i/(n-1))*plotW, H - padB + 14);
+  }
+}
+
+// ═══════════════════════════════════
+// 两融
+// ═══════════════════════════════════
+function drawMargin() {
+  var c = setupCanvas('marginCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'marginRange');
+  var n = data.length;
+  var padL = 50, padR = 10, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+
+  // 过滤无数据
+  var vals = data.map(function(d) { return d.margin_balance || 0; });
+  var mx = Math.max.apply(null, vals.filter(function(v){return v>0;})) || 1;
+
+  // 余额面积
+  ctx.fillStyle = 'rgba(255,213,79,0.15)';
+  ctx.beginPath();
+  ctx.moveTo(padL, padT + plotH);
+  for (var i = 0; i < n; i++) {
+    if (vals[i] <= 0) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH - (vals[i]/mx)*plotH;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(padL + plotW, padT + plotH);
+  ctx.fill();
+
+  // 余额线
+  ctx.strokeStyle = '#ffd54f'; ctx.lineWidth = 2;
+  ctx.beginPath(); var started = false;
+  for (var i = 0; i < n; i++) {
+    if (vals[i] <= 0) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH - (vals[i]/mx)*plotH;
+    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 日变化柱
+  var chgs = data.map(function(d) { return d.margin_chg || 0; });
+  var maxChg = Math.max.apply(null, chgs.map(Math.abs)) || 1;
+  for (var i = 0; i < n; i++) {
+    if (chgs[i] === 0) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var barH = (chgs[i]/maxChg) * plotH * 0.3;
+    ctx.fillStyle = chgs[i] > 0 ? 'rgba(229,87,57,0.5)' : 'rgba(66,165,245,0.5)';
+    ctx.fillRect(x - 1, padT + plotH/2 - barH, 2, Math.abs(barH));
+  }
+
+  // Y轴
+  ctx.fillStyle = '#778'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(fmtAmt(mx), padL - 4, padT + 10);
+  ctx.fillText('0', padL - 4, padT + plotH + 3);
+
+  // X轴
+  ctx.textAlign = 'center';
+  var step = Math.ceil(n / 6);
+  for (var i = 0; i < n; i += step) {
+    ctx.fillText(data[i].date.substring(0,4), padL + (i/(n-1))*plotW, H - padB + 14);
+  }
+
+  // 当前值
+  var last = vals[n-1];
+  if (last > 0) {
+    ctx.fillStyle = '#ffd54f'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('融资余额: ' + fmtAmt(last), padL + 8, padT + 14);
+  }
+}
+
+// ═══════════════════════════════════
+// 北向资金
+// ═══════════════════════════════════
+function drawNorth() {
+  var c = setupCanvas('northCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'northRange');
+  var n = data.length;
+  var padL = 50, padR = 50, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+
+  // 日净流入柱
+  var nets = data.map(function(d) { return d.north_net || 0; });
+  var maxNet = Math.max.apply(null, nets.map(Math.abs)) || 1;
+  for (var i = 0; i < n; i++) {
+    var x = padL + (i/(n-1))*plotW;
+    var barH = (nets[i]/maxNet) * plotH * 0.4;
+    ctx.fillStyle = nets[i] > 0 ? 'rgba(77,182,172,0.6)' : 'rgba(229,87,57,0.4)';
+    ctx.fillRect(x - 1, padT + plotH/2 - barH, 2, Math.abs(barH));
+  }
+
+  // 5日均线
+  ctx.strokeStyle = '#4db6ac'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var ma5 = data[i].north_net_ma5 || 0;
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH/2 - (ma5/maxNet)*plotH*0.4;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 累计线 (右轴)
+  var cum = data.map(function(d) { return d.north_cum || 0; });
+  var cumMin = Math.min.apply(null, cum), cumMax = Math.max.apply(null, cum);
+  var cumR = cumMax - cumMin || 1;
+  ctx.strokeStyle = '#ab47bc'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH - ((cum[i]-cumMin)/cumR)*plotH;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 零线
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT + plotH/2); ctx.lineTo(W-padR, padT+plotH/2); ctx.stroke();
+
+  // Y轴标签
+  ctx.fillStyle = '#778'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(fmtAmt(maxNet), padL - 4, padT + 10);
+  ctx.fillText('0', padL - 4, padT + plotH/2 + 3);
+  // 右轴累计
+  ctx.textAlign = 'left'; ctx.fillStyle = '#ab47bc';
+  ctx.fillText(fmtAmt(cumMax), W - padR + 4, padT + 10);
+  ctx.fillText(fmtAmt(cumMin), W - padR + 4, padT + plotH);
+
+  // X轴
+  ctx.fillStyle = '#778'; ctx.textAlign = 'center';
+  var step = Math.ceil(n / 6);
+  for (var i = 0; i < n; i += step) {
+    ctx.fillText(data[i].date.substring(0,4), padL + (i/(n-1))*plotW, H - padB + 14);
+  }
+}
+
+// ═══════════════════════════════════
+// 利率
+// ═══════════════════════════════════
+function drawRate() {
+  var c = setupCanvas('rateCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'rateRange');
+  var n = data.length;
+  var padL = 50, padR = 10, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var metric = document.getElementById('rateMetric').value;
+
+  if (metric === 'level') {
+    // SHIBOR隔夜 + 3M
+    var ons = data.map(function(d){return d.shibor_on||0;});
+    var m3s = data.map(function(d){return d.shibor_3m||0;});
+    var mx = Math.max(Math.max.apply(null,ons), Math.max.apply(null,m3s)) || 5;
+    var mn = 0;
+
+    ctx.strokeStyle = '#42a5f5'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var i = 0; i < n; i++) {
+      var x = padL + (i/(n-1))*plotW;
+      var y = padT + plotH - (ons[i]/mx)*plotH;
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ff8a65'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var i = 0; i < n; i++) {
+      var x = padL + (i/(n-1))*plotW;
+      var y = padT + plotH - (m3s[i]/mx)*plotH;
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // 填充隔夜利率下方
+    ctx.fillStyle = 'rgba(66,165,245,0.08)';
+    ctx.beginPath(); ctx.moveTo(padL, padT+plotH);
+    for (var i = 0; i < n; i++) {
+      ctx.lineTo(padL + (i/(n-1))*plotW, padT + plotH - (ons[i]/mx)*plotH);
+    }
+    ctx.lineTo(padL+plotW, padT+plotH); ctx.fill();
+
+    // 图例
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#42a5f5'; ctx.textAlign='left';
+    ctx.fillText('SHIBOR隔夜: ' + ons[n-1].toFixed(2) + '%', padL+8, padT+14);
+    ctx.fillStyle = '#ff8a65';
+    ctx.fillText('SHIBOR 3M: ' + m3s[n-1].toFixed(2) + '%', padL+8, padT+28);
+
+  } else {
+    // 期限利差
+    var spreads = data.map(function(d){return (d.shibor_3m||0) - (d.shibor_on||0);});
+    var mx = Math.max.apply(null, spreads) || 2;
+    var mn = Math.min.apply(null, spreads);
+    mn = Math.min(mn, 0);
+    var rng = mx - mn || 1;
+
+    ctx.fillStyle = 'rgba(171,71,188,0.12)';
+    ctx.beginPath(); ctx.moveTo(padL, padT+plotH);
+    for (var i = 0; i < n; i++) {
+      var x = padL + (i/(n-1))*plotW;
+      var y = padT + plotH - ((spreads[i]-mn)/rng)*plotH;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(padL+plotW, padT+plotH); ctx.fill();
+
+    ctx.strokeStyle = '#ab47bc'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < n; i++) {
+      var x = padL + (i/(n-1))*plotW;
+      var y = padT + plotH - ((spreads[i]-mn)/rng)*plotH;
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // 零线
+    if (mn < 0) {
+      var zy = padT + plotH - ((0-mn)/rng)*plotH;
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.beginPath(); ctx.moveTo(padL, zy); ctx.lineTo(W-padR, zy); ctx.stroke();
+    }
+
+    ctx.fillStyle = '#ab47bc'; ctx.font='10px sans-serif'; ctx.textAlign='left';
+    ctx.fillText('3M-隔夜利差: ' + spreads[n-1].toFixed(2) + '%', padL+8, padT+14);
+  }
+
+  // X轴
+  ctx.fillStyle = '#778'; ctx.textAlign = 'center';
+  var step = Math.ceil(n / 6);
+  for (var i = 0; i < n; i += step) {
+    ctx.fillText(data[i].date.substring(0,4), padL + (i/(n-1))*plotW, H - padB + 14);
+  }
+}
+
+// ═══════════════════════════════════
+// 宏观流动性: M2/M1/社融/外汇
+// ═══════════════════════════════════
+function drawMacro() {
+  var c = setupCanvas('macroCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'macroRange');
+  var n = data.length;
+  var padL = 50, padR = 50, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var metric = document.getElementById('macroMetric').value;
+
+  if (metric === 'm2_m1') {
+    var m2y = data.map(function(d){return d.m2_yoy||0;});
+    var m1y = data.map(function(d){return d.m1_yoy||0;});
+    var sc = data.map(function(d){return d.m1_m2_scissors||0;});
+    var mx = Math.max(Math.max.apply(null,m2y), Math.max.apply(null,m1y), 0);
+    var mn = Math.min(Math.min.apply(null,m2y), Math.min.apply(null,m1y), -5);
+    var rng = mx - mn || 1;
+
+    // M2同比面积
+    ctx.fillStyle = 'rgba(129,199,132,0.1)';
+    ctx.beginPath(); ctx.moveTo(padL, padT+plotH);
+    for (var i=0;i<n;i++) {
+      var x=padL+(i/(n-1))*plotW, y=padT+plotH-((m2y[i]-mn)/rng)*plotH;
+      ctx.lineTo(x,y);
+    }
+    ctx.lineTo(padL+plotW,padT+plotH); ctx.fill();
+    // M2线
+    ctx.strokeStyle='#81c784'; ctx.lineWidth=2; ctx.beginPath();
+    for (var i=0;i<n;i++) {
+      var x=padL+(i/(n-1))*plotW, y=padT+plotH-((m2y[i]-mn)/rng)*plotH;
+      if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    } ctx.stroke();
+    // M1线
+    ctx.strokeStyle='#64b5f6'; ctx.lineWidth=2; ctx.beginPath();
+    for (var i=0;i<n;i++) {
+      var x=padL+(i/(n-1))*plotW, y=padT+plotH-((m1y[i]-mn)/rng)*plotH;
+      if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    } ctx.stroke();
+    // 剪刀差柱
+    var scMx=Math.max.apply(null,sc.map(Math.abs))||1;
+    for (var i=0;i<n;i++) {
+      var x=padL+(i/(n-1))*plotW;
+      var h=(sc[i]/scMx)*plotH*0.2;
+      ctx.fillStyle=sc[i]>0?'rgba(229,87,57,0.3)':'rgba(66,165,245,0.3)';
+      ctx.fillRect(x-1,padT+plotH/2-h,2,Math.abs(h));
+    }
+    // 零线
+    var zy=padT+plotH-((0-mn)/rng)*plotH;
+    ctx.strokeStyle='rgba(255,255,255,0.1)';
+    ctx.beginPath();ctx.moveTo(padL,zy);ctx.lineTo(W-padR,zy);ctx.stroke();
+
+    ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillStyle='#81c784';ctx.fillText('M2同比: '+m2y[n-1].toFixed(1)+'%',padL+8,padT+14);
+    ctx.fillStyle='#64b5f6';ctx.fillText('M1同比: '+m1y[n-1].toFixed(1)+'%',padL+8,padT+28);
+    ctx.fillStyle=sc[n-1]>0?'#e57':'#4af';ctx.fillText('剪刀差(M1-M2): '+sc[n-1].toFixed(1)+'%',padL+8,padT+42);
+    // Y轴
+    ctx.fillStyle='#778';ctx.font='9px sans-serif';ctx.textAlign='right';
+    ctx.fillText(mx.toFixed(0)+'%',padL-4,padT+10);ctx.fillText(mn.toFixed(0)+'%',padL-4,padT+plotH);
+
+  } else if (metric === 'social') {
+    var sf=data.map(function(d){return d.sf_total||0;});
+    var sfZ=data.map(function(d){return d.sf_z||0;});
+    var mx2=Math.max.apply(null,sf)||1;
+    // 社融柱
+    for (var i=0;i<n;i++) {
+      if(sf[i]===0)continue;
+      var x=padL+(i/(n-1))*plotW;
+      var h=(sf[i]/mx2)*plotH*0.7;
+      var z=sfZ[i];
+      var color = z>1?'rgba(229,87,57,0.6)':z<-1?'rgba(66,165,245,0.6)':'rgba(171,71,188,0.4)';
+      ctx.fillStyle=color;
+      ctx.fillRect(x-2,padT+plotH-h,4,h);
+    }
+    // 12月均线
+    ctx.strokeStyle='rgba(255,213,79,0.7)';ctx.lineWidth=1.5;ctx.beginPath();
+    var started=false;
+    for (var i=0;i<n;i++) {
+      if(data[i].sf_total_12m==null)continue;
+      var x=padL+(i/(n-1))*plotW;
+      var h=(data[i].sf_total_12m/mx2)*plotH*0.7;
+      var y=padT+plotH-h;
+      if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);
+    } ctx.stroke();
+    ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillStyle='#ab47bc';ctx.fillText('社融增量: '+fmtAmt(sf[n-1])+'亿',padL+8,padT+14);
+    ctx.fillStyle='rgba(255,213,79,0.9)';ctx.fillText('12月均值',padL+8,padT+28);
+
+  } else {
+    // 外汇储备
+    var fx=data.map(function(d){return d.fx_reserve||0;});
+    var fxVals=fx.filter(function(v){return v>0;});
+    var mx3=Math.max.apply(null,fxVals)||4;
+    var mn3=Math.min.apply(null,fxVals)||2;
+    var r3=mx3-mn3||1;
+    ctx.fillStyle='rgba(129,199,132,0.1)';
+    ctx.beginPath();ctx.moveTo(padL,padT+plotH);
+    for (var i=0;i<n;i++) {
+      if(fx[i]<=0)continue;
+      var x=padL+(i/(n-1))*plotW;
+      var y=padT+plotH-((fx[i]-mn3)/r3)*plotH;
+      ctx.lineTo(x,y);
+    }
+    ctx.lineTo(padL+plotW,padT+plotH);ctx.fill();
+    ctx.strokeStyle='#81c784';ctx.lineWidth=2;ctx.beginPath();var started=false;
+    for (var i=0;i<n;i++) {
+      if(fx[i]<=0)continue;
+      var x=padL+(i/(n-1))*plotW;
+      var y=padT+plotH-((fx[i]-mn3)/r3)*plotH;
+      if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);
+    } ctx.stroke();
+    ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillStyle='#81c784';ctx.fillText('外汇储备: '+fx.filter(function(v){return v>0;}).slice(-1)[0].toFixed(0)+'万亿$',padL+8,padT+14);
+  }
+
+  // X轴
+  ctx.fillStyle='#778';ctx.textAlign='center';
+  var step=Math.ceil(n/8);
+  for (var i=0;i<n;i+=step) ctx.fillText(data[i].date.substring(0,4),padL+(i/(n-1))*plotW,H-padB+14);
+}
+
+// ═══════════════════════════════════
+// 中美利差
+// ═══════════════════════════════════
+function drawBondSpread() {
+  var c = setupCanvas('bondSpreadCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'bondSpreadRange');
+  var n = data.length;
+  var padL = 50, padR = 10, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+
+  var s10 = data.map(function(d){return d.cn_us_spread_10y;});
+  var s2 = data.map(function(d){return d.cn_us_spread_2y;});
+
+  // 找最大绝对值
+  var allVals = s10.concat(s2).filter(function(v){return v!=null;});
+  var mx = Math.max.apply(null, allVals.concat([0]));
+  var mn = Math.min.apply(null, allVals.concat([0]));
+  var rng = mx - mn || 1;
+  var zy = padT + plotH - ((0 - mn) / rng) * plotH;
+
+  // 零线
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, zy); ctx.lineTo(W - padR, zy); ctx.stroke();
+
+  // 负利差区域填充
+  ctx.fillStyle = 'rgba(229,87,57,0.08)';
+  if (mn < 0) {
+    ctx.fillRect(padL, zy, plotW, padT + plotH - zy);
+  }
+
+  // 10Y利差线
+  ctx.strokeStyle = '#ff8a65'; ctx.lineWidth = 2; ctx.beginPath(); var started = false;
+  for (var i = 0; i < n; i++) {
+    if (s10[i] == null) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH - ((s10[i]-mn)/rng)*plotH;
+    if (!started) { ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+  } ctx.stroke();
+
+  // 2Y利差线
+  ctx.strokeStyle = '#42a5f5'; ctx.lineWidth = 2; ctx.beginPath(); started = false;
+  for (var i = 0; i < n; i++) {
+    if (s2[i] == null) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH - ((s2[i]-mn)/rng)*plotH;
+    if (!started) { ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+  } ctx.stroke();
+
+  // Y轴
+  ctx.fillStyle = '#778'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(mx.toFixed(1)+'%', padL-4, padT+10);
+  ctx.fillText('0', padL-4, zy+3);
+  ctx.fillText(mn.toFixed(1)+'%', padL-4, padT+plotH);
+
+  // 当前值
+  var last10 = s10.filter(function(v){return v!=null;}).slice(-1)[0];
+  var last2 = s2.filter(function(v){return v!=null;}).slice(-1)[0];
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  if (last10 != null) { ctx.fillStyle='#ff8a65'; ctx.fillText('10Y利差: '+last10.toFixed(2)+'%',padL+8,padT+14); }
+  if (last2 != null) { ctx.fillStyle='#42a5f5'; ctx.fillText('2Y利差: '+last2.toFixed(2)+'%',padL+8,padT+28); }
+
+  // X轴
+  ctx.fillStyle = '#778'; ctx.textAlign = 'center';
+  var step = Math.ceil(n/6);
+  for (var i = 0; i < n; i += step) ctx.fillText(data[i].date.substring(0,4),padL+(i/(n-1))*plotW,H-padB+14);
+}
+
+// ═══════════════════════════════════
+// 国债收益率曲线
+// ═══════════════════════════════════
+function drawYieldCurve() {
+  var c = setupCanvas('yieldCurveCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = getRange(DATA.data, 'yieldRange');
+  var n = data.length;
+  var padL = 50, padR = 50, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var country = document.getElementById('yieldCountry').value;
+
+  var series = [];
+  if (country === 'cn' || country === 'both') {
+    series.push({key:'cn_bond_2y',color:'#81c784',label:'CN 2Y'});
+    series.push({key:'cn_bond_10y',color:'#ff8a65',label:'CN 10Y'});
+    series.push({key:'cn_bond_30y',color:'#ab47bc',label:'CN 30Y'});
+  }
+  if (country === 'us' || country === 'both') {
+    series.push({key:'us_bond_2y',color:'#64b5f6',label:'US 2Y'});
+    series.push({key:'us_bond_10y',color:'#e57373',label:'US 10Y'});
+    series.push({key:'us_bond_30y',color:'#ffd54f',label:'US 30Y'});
+  }
+
+  // Y范围
+  var allVals = [];
+  for (var s of series) {
+    for (var i = 0; i < n; i++) {
+      var v = data[i][s.key]; if (v != null) allVals.push(v);
+    }
+  }
+  if (allVals.length === 0) return;
+  var mx = Math.max.apply(null, allVals);
+  var mn = Math.min.apply(null, allVals);
+  var rng = mx - mn || 1;
+
+  for (var s of series) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.5; ctx.beginPath(); var started = false;
+    for (var i = 0; i < n; i++) {
+      var v = data[i][s.key]; if (v == null) continue;
+      var x = padL + (i/(n-1))*plotW;
+      var y = padT + plotH - ((v-mn)/rng)*plotH;
+      if (!started) { ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+    } ctx.stroke();
+  }
+
+  // Y轴
+  ctx.fillStyle = '#778'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(mx.toFixed(1)+'%', padL-4, padT+10);
+  ctx.fillText(mn.toFixed(1)+'%', padL-4, padT+plotH);
+
+  // 图例
+  ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+  for (var i = 0; i < series.length; i++) {
+    ctx.fillStyle = series[i].color;
+    var lastVal = data.map(function(d){return d[series[i].key];}).filter(function(v){return v!=null;}).slice(-1)[0];
+    ctx.fillText(series[i].label+': '+lastVal.toFixed(2)+'%', padL+8+i*100, padT+12);
+  }
+
+  // X轴
+  ctx.fillStyle = '#778'; ctx.textAlign = 'center';
+  var step = Math.ceil(n/6);
+  for (var i = 0; i < n; i += step) ctx.fillText(data[i].date.substring(0,4),padL+(i/(n-1))*plotW,H-padB+14);
+}
+
+// ═══════════════════════════════════
+// 交叉相关性 (滚动)
+// ═══════════════════════════════════
+function drawCorr() {
+  var c = setupCanvas('corrCanvas');
+  var ctx = c.ctx, W = c.W, H = c.H;
+  var data = DATA.data;
+  var n = data.length;
+  var padL = 50, padR = 10, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var win = parseInt(document.getElementById('corrWindow').value);
+  var pair = document.getElementById('corrPair').value;
+
+  var keyMap = {
+    'amt_north': ['total_amount', 'north_net'],
+    'amt_margin': ['total_amount', 'margin_balance'],
+    'north_margin': ['north_net', 'margin_balance'],
+    'rate_amt': ['shibor_on', 'total_amount'],
+    'rate_north': ['shibor_on', 'north_net'],
+  };
+  var keys = keyMap[pair];
+  var k1 = keys[0], k2 = keys[1];
+
+  // 计算滚动相关
+  var corrs = [];
+  for (var i = 0; i < n; i++) {
+    if (i < win) { corrs.push(null); continue; }
+    var v1 = [], v2 = [];
+    for (var j = i - win; j <= i; j++) {
+      var a = data[j][k1], b = data[j][k2];
+      if (a != null && b != null && a !== 0 && b !== 0) {
+        v1.push(a); v2.push(b);
+      }
+    }
+    if (v1.length < win * 0.5) { corrs.push(null); continue; }
+    // Pearson
+    var m1 = v1.reduce(function(s,v){return s+v;},0)/v1.length;
+    var m2 = v2.reduce(function(s,v){return s+v;},0)/v2.length;
+    var num = 0, d1 = 0, d2 = 0;
+    for (var j = 0; j < v1.length; j++) {
+      num += (v1[j]-m1)*(v2[j]-m2);
+      d1 += (v1[j]-m1)*(v1[j]-m1);
+      d2 += (v2[j]-m2)*(v2[j]-m2);
+    }
+    var denom = Math.sqrt(d1*d2);
+    corrs.push(denom > 0 ? num/denom : 0);
+  }
+
+  // 绘制
+  // 背景色带: 正相关=暖, 负相关=冷
+  for (var i = 0; i < n; i++) {
+    if (corrs[i] === null) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var v = corrs[i];
+    var intensity = Math.abs(v);
+    if (v > 0) {
+      ctx.fillStyle = 'rgba(229,87,57,' + (intensity*0.15) + ')';
+    } else {
+      ctx.fillStyle = 'rgba(66,165,245,' + (intensity*0.15) + ')';
+    }
+    ctx.fillRect(x-1, padT, 3, plotH);
+  }
+
+  // 相关线
+  ctx.strokeStyle = '#cef'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); var started = false;
+  for (var i = 0; i < n; i++) {
+    if (corrs[i] === null) continue;
+    var x = padL + (i/(n-1))*plotW;
+    var y = padT + plotH/2 - corrs[i] * plotH/2;
+    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 零线
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.beginPath(); ctx.moveTo(padL, padT+plotH/2); ctx.lineTo(W-padR, padT+plotH/2); ctx.stroke();
+
+  // Y轴
+  ctx.fillStyle = '#778'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('+1', padL-4, padT+10);
+  ctx.fillText('0', padL-4, padT+plotH/2+3);
+  ctx.fillText('-1', padL-4, padT+plotH);
+
+  // X轴
+  ctx.textAlign = 'center';
+  var step = Math.ceil(n / 8);
+  for (var i = win; i < n; i += step) {
+    ctx.fillText(data[i].date.substring(0,4), padL + (i/(n-1))*plotW, H - padB + 14);
+  }
+
+  // 标题
+  var pairLabel = document.querySelector('#corrPair option:checked').textContent;
+  ctx.fillStyle = '#9cf'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(pairLabel + ' (窗口=' + win + '日)', padL+8, padT-2);
+}
+
+// ── 控件 ──
+function bindControls() {
+  var ids = ['overviewRange','marginRange','northRange','rateRange','rateMetric',
+             'macroRange','macroMetric','bondSpreadRange','yieldRange','yieldCountry',
+             'corrWindow','corrPair'];
+  var fns = [drawOverview, drawMargin, drawNorth, drawRate, drawRate,
+             drawMacro, drawMacro, drawBondSpread, drawYieldCurve, drawYieldCurve,
+             drawCorr, drawCorr];
+  for (var i = 0; i < ids.length; i++) {
+    document.getElementById(ids[i]).addEventListener('change', fns[i]);
+  }
+
+  var tip = document.getElementById('tip');
+
+  // 总览悬停
+  var oc = document.getElementById('overviewCanvas');
+  oc.addEventListener('mousemove', function(e) {
+    var data = getRange(DATA.data, 'overviewRange');
+    var n = data.length;
+    var rect = oc.getBoundingClientRect();
+    var padL = 50, padR = 50;
+    var plotW = rect.width - padL - padR;
+    var idx = Math.round((e.clientX - rect.left - padL) / plotW * (n - 1));
+    if (idx >= 0 && idx < n) {
+      var d = data[idx];
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY + 12) + 'px';
+      var h = fmtDate(d.date);
+      if (d.total_amount) h += '<br>成交额: ' + fmtAmt(d.total_amount);
+      if (d.margin_balance) h += '<br>融资余额: ' + fmtAmt(d.margin_balance);
+      if (d.north_net) h += '<br>北向净流入: ' + fmtAmt(d.north_net);
+      if (d.shibor_on) h += '<br>SHIBOR隔夜: ' + d.shibor_on.toFixed(2) + '%';
+      if (d.shibor_3m) h += '<br>SHIBOR 3M: ' + d.shibor_3m.toFixed(2) + '%';
+      tip.innerHTML = h;
+    } else tip.style.display = 'none';
+  });
+  oc.addEventListener('mouseleave', function() { tip.style.display = 'none'; });
+}
+</script>
+</body>
+</html>

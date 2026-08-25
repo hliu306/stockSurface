@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股日历热力图 · Calendar</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#08080f; overflow-x:hidden; overflow-y:auto; font-family:'SF Mono','Monaco','Menlo',monospace; }
+
+#hud {
+  position:fixed; top:0; left:0; width:100%; padding:10px 20px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; pointer-events:none; z-index:10;
+}
+#hud h1 { font-size:14px; font-weight:300; letter-spacing:3px; opacity:0.9; }
+#hud .sub { font-size:10px; opacity:0.4; margin-top:2px; letter-spacing:1px; }
+
+#controls {
+  position:fixed; bottom:0; left:0; width:100%; padding:8px 20px;
+  background:linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; z-index:10; display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;
+}
+.ctrl-group { display:flex; flex-direction:column; gap:3px; }
+.ctrl-group label { font-size:9px; opacity:0.5; letter-spacing:1px; text-transform:uppercase; }
+.ctrl-group select {
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+  color:#fff; padding:3px 8px; font-family:inherit; font-size:11px;
+  border-radius:4px; cursor:pointer;
+}
+
+#tooltip {
+  position:fixed; display:none; background:rgba(0,0,0,0.92);
+  border:1px solid rgba(255,255,255,0.2); border-radius:6px;
+  padding:6px 10px; font-size:10px; color:#fff;
+  pointer-events:none; z-index:20;
+}
+
+#loading {
+  position:fixed; top:50px; left:50%; transform:translateX(-50%);
+  color:#fff; font-size:13px; letter-spacing:3px; opacity:0.6; z-index:5;
+}
+
+#cal-grid {
+  margin-top:60px; margin-bottom:60px; margin-left:20px;
+  display:flex; flex-direction:column; gap:20px;
+}
+.cal-year {
+  display:flex; gap:4px; align-items:flex-start;
+}
+.cal-year-label {
+  color:rgba(255,255,255,0.5); font-size:14px; font-weight:bold;
+  min-width:40px; padding-top:4px;
+}
+.cal-months {
+  display:grid; grid-template-columns: repeat(12, 1fr); gap:3px;
+  flex:1; max-width:1400px;
+}
+.cal-month {
+  display:flex; flex-direction:column; align-items:center; gap:1px;
+}
+.cal-month-label {
+  color:rgba(255,255,255,0.3); font-size:8px; margin-bottom:1px;
+}
+.cal-cells {
+  display:grid; grid-template-columns: repeat(7, 1fr); gap:1px;
+}
+.cal-cell {
+  width:8px; height:8px; border-radius:1px; cursor:pointer;
+  transition:transform 0.1s;
+}
+.cal-cell:hover { transform:scale(2.5); z-index:3; }
+
+.cal-cell.empty { background:transparent; cursor:default; }
+.cal-cell.empty:hover { transform:none; }
+
+#legend-bar {
+  display:flex; gap:1px; margin-top:6px;
+}
+#legend-bar .cal-cell { cursor:default; }
+#legend-bar .cal-cell:hover { transform:none; }
+.legend-label { color:rgba(255,255,255,0.4); font-size:9px; }
+
+/* stats */
+#cal-stats {
+  display:flex; gap:20px; margin-top:10px; flex-wrap:wrap;
+}
+.stat-box {
+  background:rgba(12,12,20,0.9); border:1px solid rgba(255,255,255,0.08);
+  border-radius:4px; padding:6px 12px;
+}
+.stat-box .stat-label { font-size:8px; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; }
+.stat-box .stat-val { font-size:14px; font-weight:bold; margin-top:2px; }
+
+#navbar {
+  position:fixed; top:0; right:0; z-index:15; display:flex; gap:2px;
+  padding:8px 16px;
+}
+.nav-item {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:5px 12px; font-size:10px;
+  font-family:'SF Mono',monospace; border-radius:4px; cursor:pointer;
+  transition:all 0.15s; text-decoration:none; letter-spacing:1px;
+}
+.nav-item:hover { background:rgba(255,255,255,0.12); color:#fff; }
+.nav-item.active { background:rgba(100,180,255,0.25); border-color:rgba(100,180,255,0.4); color:#6bf; }
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="index.html">3D波浪</a>
+  <a class="nav-item" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="phase.html">相空间</a>
+    <a class="nav-item" href="marketstates.html">市场状态</a>
+      <a class="nav-item" href="marketscore.html">市场评分</a>
+        <a class="nav-item" href="liquidity.html">流动性</a>
+  <a class="nav-item active" href="calendar.html">日历热力</a>
+  <a class="nav-item" href="state.html">温度计</a>
+</div>
+
+<div id="hud">
+  <h1>A股日历热力图 · MARKET CALENDAR</h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="loading">LOADING DATA...</div>
+<div id="tooltip"></div>
+
+<div id="cal-grid"></div>
+
+<div id="cal-stats" style="margin-left:20px; margin-bottom:60px;"></div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <label>指标 METRIC</label>
+    <select id="metric">
+      <option value="mean_ret" selected>日均收益率</option>
+      <option value="total_amount">成交额</option>
+      <option value="std_ret">截面波动率</option>
+      <option value="up_pct">上涨占比</option>
+      <option value="skew">情绪偏度(mean−median)</option>
+    </select>
+  </div>
+</div>
+
+<script>
+var DATA = null;
+var cfg = { metric: 'mean_ret' };
+var dailyMap = {};
+var allYears = [];
+
+function loadData() {
+  fetch('data.json').then(function(r){ return r.json(); }).then(function(data){
+    DATA = data;
+    for (var i = 0; i < DATA.daily.length; i++) {
+      dailyMap[DATA.daily[i].date_str] = DATA.daily[i];
+    }
+    allYears = Object.keys(DATA.daily.reduce(function(acc, d){
+      acc[d.date_str.slice(0,4)] = true; return acc;
+    }, {})).sort();
+
+    document.getElementById('loading').style.display='none';
+    render();
+  });
+}
+
+function getVal(d) {
+  if (!d) return null;
+  if (cfg.metric === 'skew') return (d.mean_ret||0) - (d.median_ret||0);
+  if (cfg.metric === 'up_pct') return d.up_pct != null ? d.up_pct : (d.n_up||0)/(d.n_stocks||1);
+  return d[cfg.metric];
+}
+
+function getColor(val) {
+  if (val == null || isNaN(val)) return '#1a1a22';
+  var m = cfg.metric;
+  var intensity, r, g, b;
+
+  if (m === 'mean_ret' || m === 'skew') {
+    intensity = Math.min(Math.abs(val) / 0.03, 1);
+    if (val > 0) { r=50; g=200; b=80; }
+    else { r=230; g=70; b=60; }
+  } else if (m === 'std_ret') {
+    intensity = Math.min(val / 0.06, 1);
+    r=255; g=140; b=30;
+  } else if (m === 'up_pct') {
+    intensity = Math.abs(val - 0.5) / 0.4;
+    if (val > 0.5) { r=50; g=200; b=80; }
+    else { r=230; g=70; b=60; }
+  } else if (m === 'total_amount') {
+    intensity = Math.min(val / 3e12, 1);
+    r=80; g=150; b=255;
+  } else {
+    intensity = Math.min(Math.abs(val), 1);
+    r=100; g=100; b=130;
+  }
+  var alpha = 0.12 + intensity * 0.85;
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+function render() {
+  var grid = document.getElementById('cal-grid');
+  grid.innerHTML = '';
+  var metricLabels = {
+    mean_ret:'日均收益率', total_amount:'成交额', std_ret:'截面波动率',
+    up_pct:'上涨占比', skew:'情绪偏度'
+  };
+  document.getElementById('hud-sub').textContent =
+    metricLabels[cfg.metric] + ' · ' + allYears.length + '年 · '
+    + DATA.daily[0].date_str + ' → ' + DATA.daily[DATA.daily.length-1].date_str;
+
+  for (var yi = 0; yi < allYears.length; yi++) {
+    var year = allYears[yi];
+    var yearDiv = document.createElement('div');
+    yearDiv.className = 'cal-year';
+
+    var lbl = document.createElement('div');
+    lbl.className = 'cal-year-label';
+    lbl.textContent = year;
+    yearDiv.appendChild(lbl);
+
+    var monthsDiv = document.createElement('div');
+    monthsDiv.className = 'cal-months';
+
+    for (var m = 0; m < 12; m++) {
+      var monthDiv = document.createElement('div');
+      monthDiv.className = 'cal-month';
+
+      var mLbl = document.createElement('div');
+      mLbl.className = 'cal-month-label';
+      mLbl.textContent = (m+1) + '月';
+      monthDiv.appendChild(mLbl);
+
+      var cellsDiv = document.createElement('div');
+      cellsDiv.className = 'cal-cells';
+
+      // compute first day of month
+      var firstDay = new Date(parseInt(year), m, 1);
+      var daysInMonth = new Date(parseInt(year), m+1, 0).getDate();
+      var startWeekday = firstDay.getDay(); // 0=Sunday
+
+      // empty cells before month start
+      for (var e = 0; e < startWeekday; e++) {
+        var emptyCell = document.createElement('div');
+        emptyCell.className = 'cal-cell empty';
+        cellsDiv.appendChild(emptyCell);
+      }
+
+      for (var day = 1; day <= daysInMonth; day++) {
+        var dateStr = year + '-' + String(m+1).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+        var d = dailyMap[dateStr];
+        var cell = document.createElement('div');
+        cell.className = 'cal-cell';
+        cell.style.background = getColor(getVal(d));
+        cell.dataset.date = dateStr;
+
+        if (d) {
+          cell.addEventListener('mouseenter', function(e2){
+            var ds = e2.target.dataset.date;
+            var dd = dailyMap[ds];
+            if (!dd) return;
+            var tt = document.getElementById('tooltip');
+            tt.style.display = 'block';
+            tt.style.left = (e2.clientX + 12) + 'px';
+            tt.style.top = (e2.clientY - 40) + 'px';
+            var val = getVal(dd);
+            var valStr;
+            if (cfg.metric === 'total_amount') valStr = (val/1e8).toFixed(0)+'亿';
+            else if (cfg.metric === 'up_pct') valStr = (val*100).toFixed(1)+'%';
+            else if (cfg.metric === 'std_ret') valStr = (val*100).toFixed(2)+'%';
+            else valStr = (val*100).toFixed(3)+'%';
+            tt.innerHTML = '<b style="color:#6bf">' + ds + '</b><br>'
+              + metricLabels[cfg.metric] + ': <b>' + valStr + '</b><br>'
+              + '涨' + (dd.n_up||0) + ' / 跌' + (dd.n_down||0) + ' / 共' + (dd.n_stocks||0);
+          });
+          cell.addEventListener('mouseleave', function(){
+            document.getElementById('tooltip').style.display = 'none';
+          });
+        }
+
+        cellsDiv.appendChild(cell);
+      }
+
+      monthDiv.appendChild(cellsDiv);
+      monthsDiv.appendChild(monthDiv);
+    }
+
+    yearDiv.appendChild(monthsDiv);
+    grid.appendChild(yearDiv);
+  }
+
+  // legend
+  var legendDiv = document.createElement('div');
+  legendDiv.style.cssText = 'margin-left:20px; display:flex; align-items:center; gap:6px;';
+  var legendL = document.createElement('span');
+  legendL.className = 'legend-label';
+  legendL.textContent = cfg.metric === 'total_amount' ? '低' : (cfg.metric==='up_pct'?'跌':'−');
+  legendDiv.appendChild(legendL);
+
+  var barDiv = document.createElement('div');
+  barDiv.id = 'legend-bar';
+  barDiv.style.display = 'flex';
+  barDiv.style.gap = '1px';
+  for (var li = 0; li <= 20; li++) {
+    var lc = document.createElement('div');
+    lc.className = 'cal-cell';
+    var demoVal;
+    if (cfg.metric === 'mean_ret' || cfg.metric === 'skew') demoVal = (li/20 - 0.5) * 0.06;
+    else if (cfg.metric === 'std_ret') demoVal = li/20 * 0.06;
+    else if (cfg.metric === 'up_pct') demoVal = li/20;
+    else demoVal = li/20 * 3e12;
+    lc.style.background = getColor(demoVal);
+    barDiv.appendChild(lc);
+  }
+  legendDiv.appendChild(barDiv);
+
+  var legendR = document.createElement('span');
+  legendR.className = 'legend-label';
+  legendR.textContent = cfg.metric === 'total_amount' ? '高' : (cfg.metric==='up_pct'?'涨':'+');
+  legendDiv.appendChild(legendR);
+
+  grid.appendChild(legendDiv);
+
+  // stats
+  renderStats();
+}
+
+function renderStats() {
+  var statsDiv = document.getElementById('cal-stats');
+  statsDiv.innerHTML = '';
+  var vals = DATA.daily.map(getVal).filter(function(v){ return v != null && !isNaN(v); });
+  if (vals.length === 0) return;
+
+  var best = DATA.daily.map(function(d){ return {d:d, v:getVal(d)}; })
+    .filter(function(x){ return x.v != null; })
+    .sort(function(a,b){ return b.v - a.v; });
+  var worst = best.slice().reverse();
+
+  function fmt(v) {
+    if (cfg.metric === 'total_amount') return (v/1e8).toFixed(0)+'亿';
+    if (cfg.metric === 'up_pct') return (v*100).toFixed(1)+'%';
+    if (cfg.metric === 'std_ret') return (v*100).toFixed(2)+'%';
+    return (v*100).toFixed(3)+'%';
+  }
+
+  var stats = [
+    {label:'最佳日', val: fmt(best[0].v), sub: best[0].d.date_str, color:'#3cb44b'},
+    {label:'最差日', val: fmt(worst[0].v), sub: worst[0].d.date_str, color:'#e6194B'},
+    {label:'中位数', val: fmt(vals.sort(function(a,b){return a-b;})[Math.floor(vals.length/2)]), sub:'', color:'#6bf'},
+    {label:'交易日', val: DATA.daily.length + '天', sub: '', color:'#aaa'},
+    {label:'上涨天', val: best.filter(function(x){return x.v>0;}).length + '天', sub: '', color:'#3cb44b'},
+    {label:'下跌天', val: best.filter(function(x){return x.v<0;}).length + '天', sub: '', color:'#e6194B'},
+  ];
+
+  for (var i = 0; i < stats.length; i++) {
+    var box = document.createElement('div');
+    box.className = 'stat-box';
+    box.innerHTML = '<div class="stat-label">' + stats[i].label + '</div>'
+      + '<div class="stat-val" style="color:' + stats[i].color + '">' + stats[i].val + '</div>'
+      + (stats[i].sub ? '<div style="font-size:9px;opacity:0.4">' + stats[i].sub + '</div>' : '');
+    statsDiv.appendChild(box);
+  }
+}
+
+function init() {
+  document.getElementById('metric').addEventListener('change', function(e){
+    cfg.metric = e.target.value; render();
+  });
+  loadData();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else { init(); }
+</script>
+</body>
+</html>

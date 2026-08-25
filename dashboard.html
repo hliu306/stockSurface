@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股市场仪表盘 · Dashboard</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#08080f; overflow:hidden; font-family:'SF Mono','Monaco','Menlo',monospace; }
+
+#hud {
+  position:fixed; top:0; left:0; width:100%; padding:10px 20px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; pointer-events:none; z-index:10;
+}
+#hud h1 { font-size:14px; font-weight:300; letter-spacing:3px; opacity:0.9; }
+#hud .sub { font-size:10px; opacity:0.4; margin-top:2px; letter-spacing:1px; }
+
+#grid {
+  position:fixed; top:50px; left:0; right:0; bottom:50px;
+  display:grid; gap:6px; padding:6px;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1.4fr 1fr;
+}
+.panel {
+  background:rgba(12,12,20,0.95); border:1px solid rgba(255,255,255,0.06);
+  border-radius:6px; position:relative; overflow:hidden;
+}
+.panel canvas { display:block; width:100%; height:100%; }
+.panel .p-title {
+  position:absolute; top:6px; left:10px; font-size:10px;
+  color:rgba(255,255,255,0.5); letter-spacing:1px; z-index:2; pointer-events:none;
+}
+.panel .p-val {
+  position:absolute; top:6px; right:10px; font-size:11px;
+  font-weight:bold; z-index:2; pointer-events:none;
+}
+
+#controls {
+  position:fixed; bottom:0; left:0; width:100%; padding:8px 20px;
+  background:linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; z-index:10; display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;
+}
+.ctrl-group { display:flex; flex-direction:column; gap:3px; }
+.ctrl-group label { font-size:9px; opacity:0.5; letter-spacing:1px; text-transform:uppercase; white-space:nowrap; }
+.ctrl-group select {
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+  color:#fff; padding:3px 8px; font-family:inherit; font-size:11px;
+  border-radius:4px; cursor:pointer;
+}
+.ctrl-group input[type="range"] {
+  -webkit-appearance:none; width:100px; height:4px; background:rgba(255,255,255,0.15);
+  border-radius:2px; outline:none; cursor:pointer;
+}
+.ctrl-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:10px; height:10px; border-radius:50%; background:#6bf; cursor:pointer;
+}
+.val-display { font-size:10px; opacity:0.7; }
+
+#tooltip {
+  position:fixed; display:none; background:rgba(0,0,0,0.92);
+  border:1px solid rgba(255,255,255,0.2); border-radius:6px;
+  padding:6px 10px; font-size:10px; color:#fff;
+  pointer-events:none; z-index:20;
+}
+
+#loading {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:#fff; font-size:13px; letter-spacing:3px; opacity:0.6; z-index:5;
+}
+
+#navbar {
+  position:fixed; top:0; right:0; z-index:15; display:flex; gap:2px;
+  padding:8px 16px;
+}
+.nav-item {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:5px 12px; font-size:10px;
+  font-family:'SF Mono',monospace; border-radius:4px; cursor:pointer;
+  transition:all 0.15s; text-decoration:none; letter-spacing:1px;
+}
+.nav-item:hover { background:rgba(255,255,255,0.12); color:#fff; }
+.nav-item.active { background:rgba(100,180,255,0.25); border-color:rgba(100,180,255,0.4); color:#6bf; }
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="index.html">3D波浪</a>
+  <a class="nav-item" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="phase.html">相空间</a>
+    <a class="nav-item" href="marketstates.html">市场状态</a>
+      <a class="nav-item" href="marketscore.html">市场评分</a>
+        <a class="nav-item" href="liquidity.html">流动性</a>
+  <a class="nav-item active" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="state.html">温度计</a>
+  <a class="nav-item" href="calendar.html">日历热力</a>
+</div>
+
+<div id="hud">
+  <h1>A股市场仪表盘 · MARKET DASHBOARD</h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="loading">LOADING DATA...</div>
+<div id="tooltip"></div>
+
+<div id="grid">
+  <div class="panel" id="p-breadth"><div class="p-title">① 市场广度 BREADTH (涨跌家数比)</div><div class="p-val" id="v-breadth"></div><canvas></canvas></div>
+  <div class="panel" id="p-liquidity"><div class="p-title">② 流动性 LIQUIDITY (日均成交额)</div><div class="p-val" id="v-liquidity"></div><canvas></canvas></div>
+  <div class="panel" id="p-dispersion"><div class="p-title">③ 分歧度 DISPERSION (截面标准差)</div><div class="p-val" id="v-dispersion"></div><canvas></canvas></div>
+  <div class="panel" id="p-sentiment"><div class="p-title">④ 情绪偏度 SKEW (均值−中位数)</div><div class="p-val" id="v-sentiment"></div><canvas></canvas></div>
+  <div class="panel" id="p-volatility"><div class="p-title">⑤ 波动率 VOLATILITY (20日年化)</div><div class="p-val" id="v-volatility"></div><canvas></canvas></div>
+  <div class="panel" id="p-concentration"><div class="p-title">⑥ 集中度 CONCENTRATION (行业HHI)</div><div class="p-val" id="v-concentration"></div><canvas></canvas></div>
+  <div class="panel" id="p-heatmap" style="grid-column:span 3;"><div class="p-title">⑦ 行业动量热力图 INDUSTRY MOMENTUM (20日滚动收益)</div><canvas></canvas></div>
+  <div class="panel" id="p-gini" style="grid-column:span 2;"><div class="p-title">⑧ 基尼系数时间序列 GINI TREND (行业资金集中度)</div><div class="p-val" id="v-gini"></div><canvas></canvas></div>
+  <div class="panel" id="p-lorenz"><div class="p-title">⑨ 洛伦兹曲线 LORENZ CURVE</div><div class="p-val" id="v-lorenz"></div><canvas></canvas></div>
+</div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <label>时段</label>
+    <select id="rangeSel">
+      <option value="365">近1年</option>
+      <option value="730" selected>近2年</option>
+      <option value="1095">近3年</option>
+      <option value="0">全部</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>滚动窗口 <span class="val-display" id="winVal">20日</span></label>
+    <input type="range" id="winSlider" min="5" max="60" step="5" value="20">
+  </div>
+</div>
+
+<script>
+var DATA = null;
+var cfg = { range:730, win:20 };
+var dailyData = null;  // filtered+sliced daily
+var indData = null;    // filtered industry
+
+function loadData() {
+  fetch('data.json').then(function(r){ return r.json(); }).then(function(data){
+    DATA = data;
+    document.getElementById('loading').style.display='none';
+    processAndRender();
+  });
+}
+
+function processAndRender() {
+  var n = DATA.daily.length;
+  var startIdx = cfg.range > 0 ? Math.max(0, n - cfg.range) : 0;
+  dailyData = DATA.daily.slice(startIdx);
+  document.getElementById('hud-sub').textContent =
+    dailyData.length + '天 · ' + dailyData[0].date_str + ' → ' + dailyData[dailyData.length-1].date_str;
+
+  // filter industry
+  var ds = dailyData[0].date_str;
+  indData = DATA.industry.filter(function(r){ return r.date_str >= ds; });
+
+  // draw all panels
+  drawBreadth();
+  drawLiquidity();
+  drawDispersion();
+  drawSentiment();
+  drawVolatility();
+  drawConcentration();
+  drawHeatmap();
+}
+
+// helper: setup canvas
+function setupCanvas(panelId) {
+  var panel = document.getElementById(panelId);
+  var cv = panel.querySelector('canvas');
+  var rect = panel.getBoundingClientRect();
+  cv.width = rect.width * (window.devicePixelRatio||1);
+  cv.height = rect.height * (window.devicePixelRatio||1);
+  var cx = cv.getContext('2d');
+  cx.scale(window.devicePixelRatio||1, window.devicePixelRatio||1);
+  return { ctx:cx, w:rect.width, h:rect.height, cv:cv };
+}
+
+function retColor(v) {
+  // v is fraction like 0.02 (2%)
+  var intensity = Math.min(Math.abs(v) / 0.04, 1);
+  if (v > 0) return 'rgba(60,200,80,' + (0.3 + intensity*0.7) + ')';
+  if (v < 0) return 'rgba(230,80,70,' + (0.3 + intensity*0.7) + ')';
+  return 'rgba(100,100,130,0.3)';
+}
+
+function drawLineChart(ctx, w, h, vals, color, opts) {
+  opts = opts || {};
+  var padL = opts.padL || 35, padR = 4, padT = opts.padT || 24, padB = opts.padB || 18;
+  var chartW = w - padL - padR, chartH = h - padT - padB;
+
+  var valid = vals.filter(function(v){ return v != null && !isNaN(v); });
+  if (valid.length < 2) return;
+  var vMin = opts.min != null ? opts.min : Math.min.apply(null, valid);
+  var vMax = opts.max != null ? opts.max : Math.max.apply(null, valid);
+  var range = vMax - vMin || 1;
+
+  // grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (var g = 0; g <= 4; g++) {
+    var gy = padT + chartH * g / 4;
+    ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(w-padR, gy); ctx.stroke();
+  }
+
+  // zero line
+  if (opts.zeroLine && vMin < 0 && vMax > 0) {
+    var zy = padT + chartH * (vMax - 0) / range;
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(padL, zy); ctx.lineTo(w-padR, zy); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // y labels
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'right';
+  for (var gl = 0; gl <= 4; gl++) {
+    var gv = vMax - range * gl / 4;
+    var gly = padT + chartH * gl / 4;
+    ctx.fillText(opts.fmt ? opts.fmt(gv) : gv.toFixed(2), padL-3, gly+3);
+  }
+
+  // fill area (if requested)
+  if (opts.fill) {
+    ctx.beginPath();
+    for (var i = 0; i < vals.length; i++) {
+      var x = padL + i / Math.max(vals.length-1,1) * chartW;
+      var y = padT + chartH * (vMax - vals[i]) / range;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.lineTo(padL + chartW, padT + chartH);
+    ctx.lineTo(padL, padT + chartH);
+    ctx.closePath();
+    ctx.fillStyle = opts.fillColor || (color + '20');
+    ctx.fill();
+  }
+
+  // line
+  ctx.strokeStyle = color;
+  ctx.lineWidth = opts.lineWidth || 1.5;
+  ctx.beginPath();
+  for (var i2 = 0; i2 < vals.length; i2++) {
+    var x2 = padL + i2 / Math.max(vals.length-1,1) * chartW;
+    var y2 = padT + chartH * (vMax - vals[i2]) / range;
+    if (i2 === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2);
+  }
+  ctx.stroke();
+
+  // x labels
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'center';
+  var labelStep = Math.max(1, Math.floor(vals.length / 6));
+  for (var xl = 0; xl < vals.length; xl += labelStep) {
+    var dl = dailyData[xl] ? dailyData[xl].date_str.slice(0,7) : '';
+    ctx.fillText(dl, padL + xl/Math.max(vals.length-1,1)*chartW, h-4);
+  }
+}
+
+// ═════════════════════════════════════════
+// PANEL 1: BREADTH (涨跌家数比)
+// ═════════════════════════════════════════
+function drawBreadth() {
+  var s = setupCanvas('p-breadth');
+  var ctx = s.ctx, w = s.w, h = s.h;
+
+  // up_pct over time
+  var vals = dailyData.map(function(d){ return (d.up_pct != null ? d.up_pct : d.n_up/(d.n_stocks||1)); });
+
+  // cumulative A/D line
+  var adLine = [];
+  var cum = 0;
+  for (var i = 0; i < dailyData.length; i++) {
+    cum += (dailyData[i].n_up || 0) - (dailyData[i].n_down || 0);
+    adLine.push(cum);
+  }
+
+  drawLineChart(ctx, w, h, adLine.map(function(v,i){
+    // normalize to up_pct scale for dual axis... actually use separate scales
+    return v;
+  }), '#6bf', { fill:true, fillColor:'rgba(100,180,255,0.08)', padT:24, padB:18,
+    fmt: function(v){ return (v/1000).toFixed(0)+'k'; }
+  });
+
+  // overlay up_pct on right axis
+  ctx.strokeStyle = 'rgba(60,200,80,0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  var padT2 = 24, padB2 = 18, padL2 = 35;
+  var chartH2 = h - padT2 - padB2, chartW2 = w - padL2 - 4;
+  for (var j = 0; j < vals.length; j++) {
+    var x = padL2 + j / Math.max(vals.length-1,1) * chartW2;
+    var y = padT2 + chartH2 * (1 - vals[j]);
+    if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 50% line
+  var y50 = padT2 + chartH2 * 0.5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.setLineDash([2,3]);
+  ctx.beginPath(); ctx.moveTo(padL2, y50); ctx.lineTo(w-4, y50); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.font = '7px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('50%', padL2+2, y50-2);
+
+  var lastUp = vals[vals.length-1];
+  var vEl = document.getElementById('v-breadth');
+  vEl.textContent = '上涨' + (lastUp*100).toFixed(1) + '%';
+  vEl.style.color = lastUp > 0.5 ? '#3cb44b' : '#e6194B';
+}
+
+// ═════════════════════════════════════════
+// PANEL 2: LIQUIDITY (日均成交额)
+// ═════════════════════════════════════════
+function drawLiquidity() {
+  var s = setupCanvas('p-liquidity');
+  var ctx = s.ctx, w = s.w, h = s.h;
+
+  var vals = dailyData.map(function(d){ return (d.total_amount||0) / 1e8; }); // 亿
+
+  // moving average
+  var win = Math.min(cfg.win, vals.length);
+  var ma = [];
+  for (var i = 0; i < vals.length; i++) {
+    var s2 = 0, c = 0;
+    for (var j = Math.max(0, i-win+1); j <= i; j++) { s2 += vals[j]; c++; }
+    ma.push(s2/c);
+  }
+
+  // bars
+  var padL = 35, padR = 4, padT = 24, padB = 18;
+  var chartW = w - padL - padR, chartH = h - padT - padB;
+  var vMax = Math.max.apply(null, vals) * 1.1;
+  var barW = chartW / vals.length;
+
+  ctx.fillStyle = 'rgba(100,180,255,0.3)';
+  for (var b = 0; b < vals.length; b++) {
+    var bh = vals[b] / vMax * chartH;
+    ctx.fillRect(padL + b*barW, padT + chartH - bh, Math.max(barW-0.5, 0.3), bh);
+  }
+
+  // MA line
+  ctx.strokeStyle = '#ffd700';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var m = 0; m < ma.length; m++) {
+    var mx = padL + (m+0.5) * barW;
+    var my = padT + chartH - ma[m]/vMax*chartH;
+    if (m === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
+  }
+  ctx.stroke();
+
+  // y labels
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'right';
+  for (var g = 0; g <= 4; g++) {
+    var gv = vMax * (1 - g/4);
+    ctx.fillText(gv.toFixed(0)+'亿', padL-3, padT + chartH*g/4 + 3);
+  }
+  // x labels
+  ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  var labelStep = Math.max(1, Math.floor(vals.length / 6));
+  for (var xl = 0; xl < vals.length; xl += labelStep) {
+    ctx.fillText(dailyData[xl].date_str.slice(0,7), padL + (xl+0.5)*barW, h-4);
+  }
+
+  var lastAmt = vals[vals.length-1];
+  var lastMA = ma[ma.length-1];
+  var vEl = document.getElementById('v-liquidity');
+  vEl.textContent = lastAmt.toFixed(0) + '亿 (MA' + cfg.win + ':' + lastMA.toFixed(0) + ')';
+  vEl.style.color = '#6bf';
+}
+
+// ═════════════════════════════════════════
+// PANEL 3: DISPERSION (截面标准差)
+// ═════════════════════════════════════════
+function drawDispersion() {
+  var s = setupCanvas('p-dispersion');
+  var vals = dailyData.map(function(d){ return (d.std_ret||0) * 100; });
+  drawLineChart(s.ctx, s.w, s.h, vals, '#ff8800', {
+    fill:true, fillColor:'rgba(255,136,0,0.1)', zeroLine:false,
+    fmt: function(v){ return v.toFixed(1)+'%'; }
+  });
+
+  var last = vals[vals.length-1];
+  var avg = vals.reduce(function(a,b){return a+b;},0) / vals.length;
+  var vEl = document.getElementById('v-dispersion');
+  vEl.textContent = last.toFixed(2) + '% (均' + avg.toFixed(2) + '%)';
+  vEl.style.color = last > avg ? '#ff8800' : '#3cb44b';
+}
+
+// ═════════════════════════════════════════
+// PANEL 4: SENTIMENT/SKEW (mean−median)
+// ═════════════════════════════════════════
+function drawSentiment() {
+  var s = setupCanvas('p-sentiment');
+  var vals = dailyData.map(function(d){ return ((d.mean_ret||0) - (d.median_ret||0)) * 100; });
+
+  // bar chart: positive=green up, negative=red down
+  var padL = 35, padR = 4, padT = 24, padB = 18;
+  var chartW = s.w - padL - padR, chartH = s.h - padT - padB;
+  var vMax = Math.max.apply(null, vals.map(Math.abs));
+  var midY = padT + chartH/2;
+  var barW = chartW / vals.length;
+
+  for (var i = 0; i < vals.length; i++) {
+    var bh = Math.abs(vals[i]) / vMax * chartH * 0.45;
+    if (vals[i] > 0) {
+      ctx = s.ctx;
+      ctx.fillStyle = 'rgba(60,200,80,0.5)';
+      ctx.fillRect(padL + i*barW, midY - bh, Math.max(barW-0.5,0.3), bh);
+    } else {
+      ctx.fillStyle = 'rgba(230,80,70,0.5)';
+      ctx.fillRect(padL + i*barW, midY, Math.max(barW-0.5,0.3), bh);
+    }
+  }
+
+  // zero line
+  s.ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  s.ctx.setLineDash([3,3]);
+  s.ctx.beginPath(); s.ctx.moveTo(padL, midY); s.ctx.lineTo(s.w-padR, midY); s.ctx.stroke();
+  s.ctx.setLineDash([]);
+
+  // y labels
+  s.ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  s.ctx.font = '8px monospace'; s.ctx.textAlign = 'right';
+  s.ctx.fillText('+'+vMax.toFixed(2)+'%', padL-3, padT+8);
+  s.ctx.fillText('0', padL-3, midY+3);
+  s.ctx.fillText('-'+vMax.toFixed(2)+'%', padL-3, padT+chartH-2);
+
+  var last = vals[vals.length-1];
+  var vEl = document.getElementById('v-sentiment');
+  vEl.textContent = (last > 0 ? '+' : '') + last.toFixed(3) + '%';
+  vEl.style.color = last > 0.1 ? '#3cb44b' : (last < -0.1 ? '#e6194B' : '#aaa');
+}
+
+// ═════════════════════════════════════════
+// PANEL 5: VOLATILITY (20日滚动年化)
+// ═════════════════════════════════════════
+function drawVolatility() {
+  var s = setupCanvas('p-volatility');
+  var rets = dailyData.map(function(d){ return d.mean_ret || 0; });
+
+  var win = Math.min(cfg.win, rets.length);
+  var volVals = [];
+  for (var i = 0; i < rets.length; i++) {
+    if (i < win-1) { volVals.push(null); continue; }
+    var sum = 0, cnt = 0;
+    for (var j = i-win+1; j <= i; j++) { sum += rets[j]; cnt++; }
+    var mean = sum/cnt;
+    var varSum = 0;
+    for (var k = i-win+1; k <= i; k++) { varSum += (rets[k]-mean)*(rets[k]-mean); }
+    volVals.push(Math.sqrt(varSum/cnt) * Math.sqrt(252) * 100);
+  }
+
+  // regime coloring
+  var valid = volVals.filter(function(v){ return v != null; });
+  var vAvg = valid.reduce(function(a,b){return a+b;},0) / valid.length;
+
+  // fill: below avg = green zone, above avg = orange/red zone
+  var padL = 35, padR = 4, padT = 24, padB = 18;
+  var chartW = s.w - padL - padR, chartH = s.h - padT - padB;
+  var vMin = Math.min.apply(null, valid), vMax = Math.max.apply(null, valid);
+  var range = vMax - vMin || 1;
+
+  // background regime bands
+  s.ctx.fillStyle = 'rgba(60,200,80,0.04)';
+  var lowY = padT + chartH * (vMax - vAvg) / range;
+  s.ctx.fillRect(padL, lowY, chartW, chartH - (lowY - padT));
+  s.ctx.fillStyle = 'rgba(255,136,0,0.06)';
+  s.ctx.fillRect(padL, padT, chartW, lowY - padT);
+
+  drawLineChart(s.ctx, s.w, s.h, volVals.map(function(v){ return v == null ? vAvg : v; }), '#ff4466', {
+    fmt: function(v){ return v.toFixed(0)+'%'; }, lineWidth: 2
+  });
+
+  var last = valid[valid.length-1];
+  var vEl = document.getElementById('v-volatility');
+  vEl.textContent = last.toFixed(1) + '%';
+  vEl.style.color = last > vAvg*1.3 ? '#ff4466' : (last > vAvg ? '#ff8800' : '#3cb44b');
+}
+
+// ═════════════════════════════════════════
+// PANEL 6: CONCENTRATION (行业HHI)
+// ═════════════════════════════════════════
+function drawConcentration() {
+  var s = setupCanvas('p-concentration');
+
+  // compute daily HHI from industry data
+  var byDate = {};
+  for (var i = 0; i < indData.length; i++) {
+    var ds = indData[i].date_str;
+    if (!byDate[ds]) byDate[ds] = [];
+    byDate[ds].push(indData[i].total_amount || 0);
+  }
+
+  var hhiVals = [];
+  for (var d = 0; d < dailyData.length; d++) {
+    var amounts = byDate[dailyData[d].date_str];
+    if (!amounts || amounts.length < 2) { hhiVals.push(null); continue; }
+    var total = amounts.reduce(function(a,b){return a+b;},0);
+    if (total <= 0) { hhiVals.push(null); continue; }
+    var hhi = 0;
+    for (var j = 0; j < amounts.length; j++) {
+      var share = amounts[j] / total;
+      hhi += share * share;
+    }
+    hhiVals.push(hhi * 1000); // scale for readability
+  }
+
+  // fill nulls
+  var valid = hhiVals.filter(function(v){ return v != null; });
+  if (valid.length < 2) return;
+  var vAvg = valid.reduce(function(a,b){return a+b;},0) / valid.length;
+
+  drawLineChart(s.ctx, s.w, s.h, hhiVals.map(function(v){ return v == null ? vAvg : v; }), '#911eb4', {
+    fill:true, fillColor:'rgba(145,30,180,0.1)',
+    fmt: function(v){ return v.toFixed(0); }
+  });
+
+  var last = valid[valid.length-1];
+  var vEl = document.getElementById('v-concentration');
+  vEl.textContent = last.toFixed(1);
+  vEl.style.color = last > vAvg ? '#ff8800' : '#911eb4';
+}
+
+// ═════════════════════════════════════════
+// PANEL 7: INDUSTRY MOMENTUM HEATMAP
+// ═════════════════════════════════════════
+function drawHeatmap() {
+  var s = setupCanvas('p-heatmap');
+  var ctx = s.ctx, w = s.w, h = s.h;
+
+  // get unique industries
+  var indSet = {};
+  for (var i = 0; i < indData.length; i++) indSet[indData[i].industry] = true;
+  var inds = Object.keys(indSet).sort();
+
+  // build matrix: industry → date → ret, then rolling sum
+  var byIndDate = {};
+  for (var i2 = 0; i2 < indData.length; i2++) {
+    var key = indData[i2].industry + '|' + indData[i2].date_str;
+    byIndDate[key] = indData[i2].mean_ret || 0;
+  }
+
+  // rolling return per industry
+  var win = Math.min(cfg.win, dailyData.length);
+  var matrix = []; // [industry][date]
+  for (var ii = 0; ii < inds.length; ii++) {
+    var row = [];
+    for (var d = 0; d < dailyData.length; d++) {
+      var ds = dailyData[d].date_str;
+      var sum = 0, cnt = 0;
+      for (var w2 = 0; w2 < win; w2++) {
+        var di = d - w2;
+        if (di < 0) break;
+        var v = byIndDate[inds[ii] + '|' + dailyData[di].date_str];
+        if (v != null) { sum += v; cnt++; }
+      }
+      row.push(cnt > 0 ? sum * 100 : 0); // cumulative % return
+    }
+    matrix.push(row);
+  }
+
+  // draw heatmap
+  var padL = 80, padR = 10, padT = 26, padB = 20;
+  var chartW = w - padL - padR, chartH = h - padT - padB;
+  var cellW = chartW / dailyData.length;
+  var cellH = chartH / inds.length;
+
+  for (var ri = 0; ri < inds.length; ri++) {
+    for (var ci = 0; ci < dailyData.length; ci++) {
+      var val = matrix[ri][ci];
+      var x = padL + ci * cellW;
+      var y = padT + ri * cellH;
+      ctx.fillStyle = retColor(val);
+      ctx.fillRect(x, y, Math.max(cellW+0.5, 1), Math.max(cellH+0.5, 1));
+    }
+  }
+
+  // industry labels
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '9px monospace'; ctx.textAlign = 'right';
+  for (var li = 0; li < inds.length; li++) {
+    ctx.fillText(inds[li], padL - 4, padT + li*cellH + cellH/2 + 3);
+  }
+
+  // date labels
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'center';
+  var labelStep = Math.max(1, Math.floor(dailyData.length / 12));
+  for (var dl = 0; dl < dailyData.length; dl += labelStep) {
+    ctx.fillText(dailyData[dl].date_str.slice(0,7), padL + dl*cellW + cellW/2, h-5);
+  }
+
+  // color scale legend
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('-' + (win) + '日收益 → +' + (win) + '日', padL, h - 5);
+
+  // store for hover
+  s.cv._heatmapData = { matrix:matrix, inds:inds, padL:padL, padT:padT, cellW:cellW, cellH:cellH };
+}
+
+// hover for heatmap
+function onHeatmapMove(event) {
+  var cv = document.querySelector('#p-heatmap canvas');
+  if (!cv || !cv._heatmapData) return;
+  var hd = cv._heatmapData;
+  var rect = cv.getBoundingClientRect();
+  var mx = event.clientX - rect.left;
+  var my = event.clientY - rect.top;
+  var ci = Math.floor((mx - hd.padL) / hd.cellW);
+  var ri = Math.floor((my - hd.padT) / hd.cellH);
+  if (ci < 0 || ci >= dailyData.length || ri < 0 || ri >= hd.inds.length) {
+    document.getElementById('tooltip').style.display = 'none';
+    return;
+  }
+  var val = hd.matrix[ri][ci];
+  var tt = document.getElementById('tooltip');
+  tt.style.display = 'block';
+  tt.style.left = (event.clientX + 12) + 'px';
+  tt.style.top = (event.clientY + 12) + 'px';
+  tt.innerHTML = '<b style="color:#6bf">' + hd.inds[ri] + '</b><br>'
+    + dailyData[ci].date_str + '<br>'
+    + '滚动' + cfg.win + '日: ' + (val>0?'+':'') + val.toFixed(2) + '%';
+}
+
+// ═════════════════════════════════════════
+// INIT
+// ═════════════════════════════════════════
+function init() {
+  document.getElementById('rangeSel').addEventListener('change', function(e){
+    cfg.range = parseInt(e.target.value); processAndRender();
+  });
+  document.getElementById('winSlider').addEventListener('input', function(e){
+    cfg.win = parseInt(e.target.value);
+    document.getElementById('winVal').textContent = cfg.win + '日';
+    processAndRender();
+  });
+  document.querySelector('#p-heatmap canvas').addEventListener('mousemove', onHeatmapMove);
+  document.querySelector('#p-heatmap canvas').addEventListener('mouseleave', function(){
+    document.getElementById('tooltip').style.display = 'none';
+  });
+  window.addEventListener('resize', function() { processAndRender(); });
+
+  loadData();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else { init(); }
+</script>
+</body>
+</html>

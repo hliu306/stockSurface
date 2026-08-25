@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>A股市场+板块评分 — Market & Sector Score</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0a0a14; color:#cdd; font-family:'Segoe UI',system-ui,sans-serif;
+  overflow-x:hidden;
+}
+.nav { position:fixed; top:0; left:0; right:0; height:36px;
+  background:rgba(15,15,30,0.95); display:flex; align-items:center; padding:0 12px;
+  z-index:100; border-bottom:1px solid #333; gap:2px; overflow-x:auto; }
+.nav a { color:#778; text-decoration:none; font-size:11px; padding:4px 8px;
+  border-radius:4px; white-space:nowrap; transition:.2s; }
+.nav a:hover { color:#cef; background:rgba(255,255,255,0.08); }
+.nav a.active { color:#5cf; background:rgba(80,160,255,0.12); }
+.nav .sep { color:#445; margin:0 2px; }
+
+h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0; letter-spacing:1px; }
+.subtitle { text-align:center; font-size:10px; color:#667; margin-bottom:6px; }
+
+.panel { background:rgba(20,20,40,0.6); border:1px solid #2a2a4a;
+  border-radius:8px; margin:6px; padding:8px; }
+.panel-title { font-size:12px; color:#8cf; margin-bottom:6px;
+  border-bottom:1px solid #334; padding-bottom:3px; }
+.panel-title .hint { font-size:9px; color:#567; font-weight:normal; }
+
+.layout { margin-top:42px; padding:4px; display:grid;
+  grid-template-columns: 1fr 1fr; gap:6px; max-width:1700px; }
+.layout > .panel:nth-child(1) { grid-column:1/3; }
+.layout > .panel:nth-child(2) { grid-column:1/3; }
+
+canvas { display:block; width:100%; }
+#marketCanvas { height:300px; cursor:crosshair; }
+#sectorHeatCanvas { height:280px; cursor:crosshair; }
+#radarCanvas { height:260px; }
+#cycleCanvas { height:260px; }
+
+.ctrl { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; font-size:11px; }
+.ctrl label { color:#889; }
+.ctrl select, .ctrl button {
+  background:#222; color:#ccd; border:1px solid #345; border-radius:4px;
+  padding:3px 8px; font-size:11px; cursor:pointer;
+}
+.ctrl button:hover { background:#335; }
+.ctrl button.active { background:#246; color:#cef; }
+
+.state-badge { display:inline-block; padding:2px 8px; border-radius:10px;
+  font-size:11px; font-weight:bold; }
+
+.tooltip { position:fixed; pointer-events:none; background:rgba(10,10,20,0.95);
+  border:1px solid #558; border-radius:4px; padding:4px 8px; font-size:11px;
+  color:#cef; z-index:200; display:none; white-space:nowrap; }
+
+.state-colors { display:flex; gap:6px; margin:4px 0; flex-wrap:wrap; font-size:10px; }
+.state-colors span { display:flex; align-items:center; gap:3px; }
+.state-colors i { width:10px; height:10px; border-radius:2px; display:inline-block; }
+
+.formula { background:rgba(10,30,50,0.4); border-left:3px solid #47a;
+  padding:6px 10px; margin:6px 0; font-size:10px; color:#8ac; line-height:1.6; }
+.formula b { color:#ace; }
+
+.sector-table { width:100%; font-size:10px; border-collapse:collapse; margin-top:4px; }
+.sector-table th { text-align:left; color:#889; padding:3px 4px; border-bottom:1px solid #334; }
+.sector-table td { padding:2px 4px; border-bottom:1px solid #222; color:#bcd; }
+.sector-table tr:hover td { background:rgba(80,160,255,0.06); }
+.bar-cell { position:relative; }
+.bar-bg { position:absolute; left:0; top:0; bottom:0; border-radius:2px; opacity:0.3; }
+
+.cycle-box { display:inline-block; padding:2px 6px; border-radius:3px; font-size:9px; font-weight:bold; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="index.html">3D波浪</a>
+  <a href="streamgraph.html">资金流向</a>
+  <a href="sankey.html">桑基迁移</a>
+  <a href="dashboard.html">仪表盘</a>
+  <a href="calendar.html">日历热力</a>
+  <a href="state.html">温度计</a>
+  <a href="phase.html">相空间</a>
+  <span class="sep">|</span>
+  <a href="marketstates.html">市场状态</a>
+  <a href="marketscore.html" class="active">市场评分</a>
+    <a href="liquidity.html">流动性</a>
+</div>
+
+<div style="margin-top:42px">
+  <h1>A股市场+板块评分系统</h1>
+  <div class="subtitle">MarketScore · SectorScore · 周期阶段识别</div>
+</div>
+
+<div class="layout">
+
+<!-- 市场评分走势 -->
+<div class="panel">
+  <div class="panel-title">MarketScore 市场状态评分走势 <span class="hint">（5档分类：强上涨/弱上涨/平衡轮动/弱下降/强下降）</span></div>
+  <canvas id="marketCanvas"></canvas>
+  <div class="state-colors">
+    <span><i style="background:#e53935"></i>强上涨</span>
+    <span><i style="background:#ff8a65"></i>弱上涨</span>
+    <span><i style="background:#78909c"></i>平衡轮动</span>
+    <span><i style="background:#4fc3f7"></i>弱下降</span>
+    <span><i style="background:#1565c0"></i>强下降</span>
+  </div>
+  <div class="ctrl">
+    <label>显示范围:</label>
+    <select id="marketRange">
+      <option value="0">全部(2015-2026)</option>
+      <option value="500">最近500天</option>
+      <option value="250" selected>最近250天</option>
+      <option value="100">最近100天</option>
+    </select>
+    <span style="margin-left:8px;color:#889;font-size:10px" id="marketHover">悬停查看详情</span>
+  </div>
+</div>
+
+<!-- 板块热力图 -->
+<div class="panel">
+  <div class="panel-title">板块评分热力图 <span class="hint">（横轴=日期，纵轴=行业，颜色=SectorScore；红=强势，蓝=弱势）</span></div>
+  <canvas id="sectorHeatCanvas"></canvas>
+  <div class="ctrl">
+    <label>排序:</label>
+    <select id="heatSort">
+      <option value="score">按最新评分</option>
+      <option value="alpha">按行业名</option>
+      <option value="trend">按5日变化</option>
+    </select>
+    <label style="margin-left:8px;">显示top:</label>
+    <select id="heatTop">
+      <option value="0">全部110</option>
+      <option value="30" selected>Top 30</option>
+      <option value="20">Top 20</option>
+      <option value="10">Top 10</option>
+    </select>
+    <span style="margin-left:8px;color:#889;font-size:10px" id="heatHover">悬停查看详情</span>
+  </div>
+</div>
+
+<!-- 雷达图 -->
+<div class="panel">
+  <div class="panel-title">市场状态雷达 <span class="hint">（6维分解：B20/Ravg20/Zturnover/NHNL/Vol/Trend）</span></div>
+  <canvas id="radarCanvas"></canvas>
+  <div class="ctrl">
+    <label>日期:</label>
+    <select id="radarDate"></select>
+    <button id="radarPrev">◀</button>
+    <button id="radarNext">▶</button>
+  </div>
+</div>
+
+<!-- 周期阶段 -->
+<div class="panel">
+  <div class="panel-title">板块周期阶段分布 <span class="hint">（发现→扩散→共识→拥挤→衰退）</span></div>
+  <canvas id="cycleCanvas"></canvas>
+  <div class="ctrl">
+    <label>日期:</label>
+    <select id="cycleDate"></select>
+  </div>
+  <table class="sector-table" id="sectorTable">
+    <thead><tr>
+      <th>#</th><th>板块</th><th>评分</th><th>ER20</th><th>额份额</th><th>Δ份额</th><th>广度</th><th>阶段</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+</div>
+
+<div class="panel" style="margin:8px;max-width:1700px">
+  <div class="panel-title">公式与说明</div>
+  <div class="formula">
+    <b>MarketScore</b> = 0.25×B₂₀ + 0.20×Ravg,₂₀ + 0.20×Z<sub>turnover</sub> + 0.15×NHNL − 0.10×Vol + 0.10×Trend<br>
+    B₂₀: 站上20日线比例 | Ravg,₂₀: 20日平均收益 | Z<sub>turnover</sub>: 成交额Z分数 | NHNL: 新高减新低 | Vol: 波动率 | Trend: 趋势一致度<br><br>
+    <b>SectorScore</b> = 0.25×ER₂₀ + 0.20×ΔShare<sub>amt</sub> + 0.20×Breadth + 0.15×Persistence + 0.10×Leader + 0.10×Liquidity<br>
+    ER₂₀: 20日超额收益 | ΔShare: 成交额份额变化 | Breadth: 上涨广度 | Persistence: 排名持续性 | Leader: 龙头强度 | Liquidity: 流动性<br><br>
+    <b>周期阶段</b>: 发现期(价格领先,关注低) → 扩散期(广度扩大) → 共识期(强趋势,高关注) → 拥挤期(广度收缩,成交集中) → 衰退期(转弱,份额下降)
+  </div>
+</div>
+
+<div class="tooltip" id="tip"></div>
+
+<script>
+var DATA = null;
+
+var STATE_COLORS = {
+  '强上涨': '#e53935', '弱上涨': '#ff8a65', '平衡轮动': '#78909c',
+  '弱下降': '#4fc3f7', '强下降': '#1565c0'
+};
+var CYCLE_COLORS = {
+  '发现期': '#66bb6a', '扩散期': '#42a5f5', '共识期': '#ab47bc',
+  '拥挤期': '#ff7043', '衰退期': '#78909c', '过渡期': '#455a64'
+};
+
+// ── 加载 ──
+fetch('market_score.json?_=' + Date.now())
+.then(r => r.json())
+.then(d => { DATA = d; init(); })
+.catch(e => { document.body.innerHTML += '<div style="color:#f88;padding:20px">加载失败: '+e+'</div>'; });
+
+function init() {
+  buildDateSelectors();
+  drawMarketScore();
+  drawSectorHeat();
+  drawRadar();
+  drawCycle();
+  buildSectorTable();
+  bindControls();
+  window.addEventListener('resize', function() {
+    drawMarketScore(); drawSectorHeat(); drawRadar(); drawCycle();
+  });
+}
+
+function fmtDate(d) { return d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8); }
+function fmtDateShort(d) { return d.substring(0,4)+d.substring(4,6); }
+
+// ── 日期选择器 ──
+function buildDateSelectors() {
+  var mkt = DATA.market;
+  // 雷达图: 最近250天
+  var radarSel = document.getElementById('radarDate');
+  var cycleSel = document.getElementById('cycleDate');
+  var start = Math.max(0, mkt.length - 250);
+  for (var i = mkt.length - 1; i >= start; i--) {
+    var opt1 = document.createElement('option');
+    opt1.value = i; opt1.textContent = fmtDate(mkt[i].date);
+    radarSel.appendChild(opt1);
+    var opt2 = document.createElement('option');
+    opt2.value = mkt[i].date; opt2.textContent = fmtDate(mkt[i].date);
+    cycleSel.appendChild(opt2);
+  }
+  radarSel.value = mkt.length - 1;
+  cycleSel.value = DATA.latest_date;
+}
+
+// ═══════════════════════════════════
+// 市场评分走势
+// ═══════════════════════════════════
+function drawMarketScore() {
+  var canvas = document.getElementById('marketCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+
+  var range = parseInt(document.getElementById('marketRange').value);
+  var mkt = range > 0 ? DATA.market.slice(-range) : DATA.market;
+  var n = mkt.length;
+  var padL = 50, padR = 10, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+
+  // 背景色带 (状态)
+  for (var i = 0; i < n; i++) {
+    ctx.fillStyle = STATE_COLORS[mkt[i].state];
+    ctx.globalAlpha = 0.12;
+    ctx.fillRect(padL + (i / n) * plotW, padT, plotW / n + 1, plotH);
+  }
+  ctx.globalAlpha = 1;
+
+  // 零线 + 阈值线
+  var thresholds = [
+    {v: 0.4, label: '强上涨', c: '#e53935'},
+    {v: 0.15, label: '弱上涨', c: '#ff8a65'},
+    {v: -0.15, label: '平衡', c: '#78909c'},
+    {v: -0.4, label: '强下降', c: '#1565c0'}
+  ];
+  ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+  for (var t of thresholds) {
+    var y = padT + plotH/2 - t.v * plotH/2;
+    ctx.strokeStyle = t.c + '44'; ctx.lineWidth = 1;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = t.c + '88';
+    ctx.fillText(t.label, padL + 4, y - 2);
+  }
+
+  // 评分曲线
+  ctx.strokeStyle = '#cef'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var x = padL + (i / (n-1)) * plotW;
+    var y = padT + plotH/2 - mkt[i].score * plotH/2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 渐变填充
+  var grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
+  grad.addColorStop(0, 'rgba(229,57,53,0.15)');
+  grad.addColorStop(0.5, 'rgba(120,144,156,0.05)');
+  grad.addColorStop(1, 'rgba(21,101,192,0.15)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var x = padL + (i / (n-1)) * plotW;
+    var y = padT + plotH/2 - mkt[i].score * plotH/2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.lineTo(padL + plotW, padT + plotH/2);
+  ctx.lineTo(padL, padT + plotH/2);
+  ctx.fill();
+
+  // 20日均线
+  ctx.strokeStyle = 'rgba(255,235,100,0.6)'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    if (i < 20) continue;
+    var avg = 0; for (var k = 0; k < 20; k++) avg += mkt[i-k].score;
+    avg /= 20;
+    var x = padL + (i / (n-1)) * plotW;
+    var y = padT + plotH/2 - avg * plotH/2;
+    if (i === 20) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Y轴
+  ctx.fillStyle = '#778'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  for (var v = -1; v <= 1; v += 0.5) {
+    var y = padT + plotH/2 - v * plotH/2;
+    ctx.fillText(v.toFixed(1), padL - 4, y + 3);
+  }
+
+  // X轴年份
+  ctx.textAlign = 'center';
+  var yearStep = Math.ceil(n / 12);
+  for (var i = 0; i < n; i += yearStep) {
+    ctx.fillText(mkt[i].date.substring(0, 4), padL + (i/(n-1))*plotW, H - padB + 14);
+  }
+
+  // 当前值标记
+  var last = mkt[n-1];
+  var lx = padL + plotW, ly = padT + plotH/2 - last.score * plotH/2;
+  ctx.fillStyle = STATE_COLORS[last.state];
+  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
+}
+
+// ═══════════════════════════════════
+// 板块热力图
+// ═══════════════════════════════════
+function drawSectorHeat() {
+  var canvas = document.getElementById('sectorHeatCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+
+  var ranks = DATA.sector_rankings;
+  var dates = [...new Set(ranks.map(r => r.date))].sort();
+  var nDates = dates.length;
+  var topN = parseInt(document.getElementById('heatTop').value);
+  var sortMode = document.getElementById('heatSort').value;
+
+  // 选行业子集
+  var allInds = [...new Set(ranks.map(r => r.industry))];
+  var latestData = ranks.filter(r => r.date === dates[dates.length-1]);
+  var selectedInds;
+  if (topN > 0) {
+    selectedInds = latestData.sort((a,b) => b.score - a.score).slice(0, topN).map(r => r.industry);
+  } else {
+    selectedInds = allInds;
+  }
+  var nInds = selectedInds.length;
+
+  var padL = 90, padR = 10, padT = 10, padB = 24;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var cellW = plotW / nDates;
+  var cellH = plotH / nInds;
+
+  // 查找函数
+  var dataMap = {};
+  for (var r of ranks) {
+    var key = r.date + '|' + r.industry;
+    dataMap[key] = r;
+  }
+
+  // 绘制
+  for (var i = 0; i < nInds; i++) {
+    for (var j = 0; j < nDates; j++) {
+      var key = dates[j] + '|' + selectedInds[i];
+      var r = dataMap[key];
+      if (!r) continue;
+      var x = padL + j * cellW;
+      var y = padT + i * cellH;
+      var v = r.score;  // -1 to 1
+      var intensity = Math.min(1, Math.abs(v));
+      if (v > 0) {
+        ctx.fillStyle = 'rgba(229,87,57,' + (0.2 + intensity * 0.8) + ')';
+      } else {
+        ctx.fillStyle = 'rgba(40,120,220,' + (0.2 + intensity * 0.8) + ')';
+      }
+      ctx.fillRect(x, y, Math.ceil(cellW)+1, Math.ceil(cellH)+1);
+    }
+  }
+
+  // Y轴行业名
+  ctx.fillStyle = '#99a'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  for (var i = 0; i < nInds; i++) {
+    var name = selectedInds[i];
+    if (name.length > 8) name = name.substring(0, 8);
+    ctx.fillText(name, padL - 4, padT + i * cellH + cellH/2 + 3);
+  }
+
+  // X轴年份
+  ctx.textAlign = 'center';
+  for (var j = 0; j < nDates; j += Math.ceil(nDates/6)) {
+    ctx.fillText(dates[j].substring(0,4), padL + j * cellW + cellW/2, H - padB + 14);
+  }
+}
+
+// ═══════════════════════════════════
+// 雷达图
+// ═══════════════════════════════════
+function drawRadar() {
+  var canvas = document.getElementById('radarCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+
+  var idx = parseInt(document.getElementById('radarDate').value);
+  var m = DATA.market[idx];
+  var cx = W / 2, cy = H / 2;
+  var radius = Math.min(W, H) / 2 - 50;
+
+  var dims = [
+    {label: 'B₂₀\n均线', val: m.B20 * 2 - 1, raw: m.B20},
+    {label: 'Ravg₂₀\n收益', val: Math.max(-1, Math.min(1, m.Ravg20 / 0.2)), raw: m.Ravg20},
+    {label: 'Zturn\n成交', val: m.Zturnover, raw: m.Zturnover},
+    {label: 'NHNL\n新高低', val: m.NHNL, raw: m.NHNL},
+    {label: 'Vol\n波动', val: m.Vol > 0 ? -Math.min(1, m.Vol / 0.3) : 0, raw: m.Vol},
+    {label: 'Trend\n趋势', val: m.Trend, raw: m.Trend}
+  ];
+  var n = dims.length;
+
+  // 网格
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  for (var ring = 1; ring <= 4; ring++) {
+    ctx.beginPath();
+    for (var i = 0; i <= n; i++) {
+      var angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+      var r = radius * ring / 4;
+      var x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  // 轴线
+  for (var i = 0; i < n; i++) {
+    var angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+    ctx.stroke();
+  }
+
+  // 数据多边形
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+    var v = Math.max(-1, Math.min(1, dims[i].val));
+    var r = radius * (v + 1) / 2;
+    var x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = STATE_COLORS[m.state] + '33';
+  ctx.fill();
+  ctx.strokeStyle = STATE_COLORS[m.state];
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // 顶点
+  for (var i = 0; i < n; i++) {
+    var angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+    var v = Math.max(-1, Math.min(1, dims[i].val));
+    var r = radius * (v + 1) / 2;
+    var x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+    ctx.fillStyle = STATE_COLORS[m.state];
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 标签
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#9ab';
+  for (var i = 0; i < n; i++) {
+    var angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+    var r = radius + 20;
+    var x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+    var lines = dims[i].label.split('\n');
+    ctx.fillText(lines[0], x, y);
+    if (lines[1]) ctx.fillText(lines[1], x, y + 12);
+  }
+
+  // 中心: 评分+状态
+  ctx.fillStyle = STATE_COLORS[m.state];
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText(m.score.toFixed(3), cx, cy - 4);
+  ctx.font = '10px sans-serif';
+  ctx.fillText(m.state, cx, cy + 12);
+  ctx.fillStyle = '#667'; ctx.font = '8px sans-serif';
+  ctx.fillText(fmtDate(m.date), cx, cy + 26);
+}
+
+// ═══════════════════════════════════
+// 周期阶段
+// ═══════════════════════════════════
+function drawCycle() {
+  var canvas = document.getElementById('cycleCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+
+  var selDate = document.getElementById('cycleDate').value;
+  var dayData = DATA.sector_rankings.filter(r => r.date === selDate);
+
+  // 按阶段分组统计
+  var stages = ['发现期', '扩散期', '共识期', '拥挤期', '衰退期', '过渡期'];
+  var stageData = {};
+  for (var s of stages) {
+    stageData[s] = dayData.filter(r => r.cycle === s);
+  }
+
+  // 画阶段流: 每个阶段一个柱, 高度=板块数
+  var padL = 10, padR = 10, padT = 10, padB = 30;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var nStages = stages.length;
+  var barW = plotW / nStages * 0.7;
+  var gap = plotW / nStages * 0.3;
+  var maxN = Math.max(...stages.map(s => stageData[s].length));
+
+  for (var i = 0; i < nStages; i++) {
+    var s = stages[i];
+    var items = stageData[s];
+    var h = (items.length / maxN) * plotH;
+    var x = padL + i * (barW + gap) + gap/2;
+    var y = padT + plotH - h;
+
+    // 柱
+    ctx.fillStyle = CYCLE_COLORS[s] + '88';
+    ctx.fillRect(x, y, barW, h);
+    ctx.strokeStyle = CYCLE_COLORS[s];
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, barW, h);
+
+    // 数量
+    ctx.fillStyle = '#cef'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(items.length, x + barW/2, y - 4);
+
+    // 阶段名
+    ctx.fillStyle = CYCLE_COLORS[s]; ctx.font = '10px sans-serif';
+    ctx.fillText(s, x + barW/2, H - padB + 14);
+
+    // 列出板块名(如果少)
+    if (items.length <= 6 && items.length > 0) {
+      ctx.fillStyle = '#89a'; ctx.font = '8px sans-serif';
+      for (var j = 0; j < items.length; j++) {
+        var name = items[j].industry;
+        if (name.length > 5) name = name.substring(0, 5);
+        ctx.fillText(name, x + barW/2, y + h - 8 - j * 10);
+      }
+    }
+  }
+
+  // 标题
+  ctx.fillStyle = '#9cf'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(fmtDate(selDate) + ' 板块周期分布', padL, padT - 2);
+}
+
+// ═══════════════════════════════════
+// 板块表格
+// ═══════════════════════════════════
+function buildSectorTable() {
+  var tbody = document.querySelector('#sectorTable tbody');
+  tbody.innerHTML = '';
+  var detail = DATA.sector_detail;
+  for (var i = 0; i < detail.length; i++) {
+    var r = detail[i];
+    var tr = document.createElement('tr');
+    var scoreColor = r.score > 0 ? '#e57' : '#48c';
+    tr.innerHTML =
+      '<td>' + (i+1) + '</td>' +
+      '<td style="color:#cef">' + r.industry + '</td>' +
+      '<td><span style="color:' + scoreColor + ';font-weight:bold">' + r.score.toFixed(3) + '</span></td>' +
+      '<td>' + (r.ER20*100).toFixed(1) + '%</td>' +
+      '<td>' + (r.amt_share*100).toFixed(1) + '%</td>' +
+      '<td style="color:' + (r.delta_share > 0 ? '#e57' : '#48c') + '">' +
+        (r.delta_share*100).toFixed(2) + '%</td>' +
+      '<td>' + (r.breadth*100).toFixed(0) + '%</td>' +
+      '<td><span class="cycle-box" style="background:' + CYCLE_COLORS[r.cycle] + '22;color:' + CYCLE_COLORS[r.cycle] + '">' + r.cycle + '</span></td>';
+    tbody.appendChild(tr);
+  }
+}
+
+// ── 控件 ──
+function bindControls() {
+  document.getElementById('marketRange').addEventListener('change', drawMarketScore);
+  document.getElementById('heatSort').addEventListener('change', drawSectorHeat);
+  document.getElementById('heatTop').addEventListener('change', drawSectorHeat);
+  document.getElementById('radarDate').addEventListener('change', drawRadar);
+  document.getElementById('radarPrev').addEventListener('click', function() {
+    var sel = document.getElementById('radarDate');
+    if (sel.selectedIndex < sel.options.length - 1) {
+      sel.selectedIndex++; sel.dispatchEvent(new Event('change'));
+    }
+  });
+  document.getElementById('radarNext').addEventListener('click', function() {
+    var sel = document.getElementById('radarDate');
+    if (sel.selectedIndex > 0) { sel.selectedIndex--; sel.dispatchEvent(new Event('change')); }
+  });
+  document.getElementById('cycleDate').addEventListener('change', function() {
+    drawCycle();
+  });
+
+  // 市场评分悬停
+  var mc = document.getElementById('marketCanvas');
+  var tip = document.getElementById('tip');
+  mc.addEventListener('mousemove', function(e) {
+    var rect = mc.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var range = parseInt(document.getElementById('marketRange').value);
+    var mkt = range > 0 ? DATA.market.slice(-range) : DATA.market;
+    var n = mkt.length;
+    var padL = 50, padR = 10;
+    var plotW = rect.width - padL - padR;
+    var idx = Math.round((mx - padL) / plotW * (n - 1));
+    if (idx >= 0 && idx < n) {
+      var m = mkt[idx];
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY + 12) + 'px';
+      tip.innerHTML = fmtDate(m.date) +
+        '<br>Score: <b style="color:'+STATE_COLORS[m.state]+'">' + m.score.toFixed(3) + '</b> (' + m.state + ')' +
+        '<br>B₂₀: ' + (m.B20*100).toFixed(0) + '% | ER₂₀: ' + (m.Ravg20*100).toFixed(1) + '%' +
+        '<br>NHNL: ' + m.NHNL.toFixed(3) + ' | Z: ' + m.Zturnover.toFixed(2) +
+        '<br>Vol: ' + m.Vol.toFixed(3) + ' | Trend: ' + m.Trend.toFixed(3) +
+        '<br>成交额: ' + (m.total_amount/1e12).toFixed(2) + '万亿';
+    } else { tip.style.display = 'none'; }
+  });
+  mc.addEventListener('mouseleave', function() { tip.style.display = 'none'; });
+
+  // 热力图悬停
+  var hc = document.getElementById('sectorHeatCanvas');
+  hc.addEventListener('mousemove', function(e) {
+    var rect = hc.getBoundingClientRect();
+    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    var ranks = DATA.sector_rankings;
+    var dates = [...new Set(ranks.map(r => r.date))].sort();
+    var topN = parseInt(document.getElementById('heatTop').value);
+    var latestData = ranks.filter(r => r.date === dates[dates.length-1]);
+    var selectedInds = topN > 0
+      ? latestData.sort((a,b)=>b.score-a.score).slice(0,topN).map(r=>r.industry)
+      : [...new Set(ranks.map(r=>r.industry))];
+    var padL = 90, padT = 10;
+    var cellW = (rect.width - 90 - 10) / dates.length;
+    var cellH = (rect.height - 10 - 24) / selectedInds.length;
+    var j = Math.floor((mx - padL) / cellW);
+    var i = Math.floor((my - padT) / cellH);
+    if (i >= 0 && i < selectedInds.length && j >= 0 && j < dates.length) {
+      var key = dates[j] + '|' + selectedInds[i];
+      var r = ranks.find(function(x) { return x.date === dates[j] && x.industry === selectedInds[i]; });
+      if (r) {
+        tip.style.display = 'block';
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top = (e.clientY + 12) + 'px';
+        tip.innerHTML = r.industry + ' | ' + fmtDateShort(r.date) +
+          '<br>Score: <b>' + r.score.toFixed(3) + '</b>' +
+          '<br>ER₂₀: ' + (r.ER20*100).toFixed(1) + '%' +
+          '<br>额份额: ' + (r.amt_share*100).toFixed(1) + '%' +
+          '<br>广度: ' + (r.breadth*100).toFixed(0) + '%' +
+          '<br>阶段: <b style="color:'+CYCLE_COLORS[r.cycle]+'">' + r.cycle + '</b>';
+      }
+    } else { tip.style.display = 'none'; }
+  });
+  hc.addEventListener('mouseleave', function() { tip.style.display = 'none'; });
+}
+</script>
+</body>
+</html>

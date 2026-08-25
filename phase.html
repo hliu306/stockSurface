@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>A股相空间 · Phase Space</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#08080f; overflow:hidden; font-family:'SF Mono','Monaco','Menlo',monospace; }
+
+#hud {
+  position:fixed; top:0; left:0; width:100%; padding:10px 20px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; pointer-events:none; z-index:10;
+}
+#hud h1 { font-size:14px; font-weight:300; letter-spacing:3px; opacity:0.9; }
+#hud .sub { font-size:10px; opacity:0.4; margin-top:2px; letter-spacing:1px; }
+
+#main-canvas {
+  position:fixed; top:42px; left:0;
+  width:100%; height:calc(100vh - 162px);
+  display:block;
+}
+
+#sidebar {
+  position:fixed; top:42px; right:0; width:200px; bottom:120px;
+  background:rgba(8,8,16,0.9); border-left:1px solid rgba(255,255,255,0.08);
+  padding:12px; z-index:5; overflow-y:auto;
+}
+#sidebar h3 {
+  font-size:9px; color:rgba(255,255,255,0.4); letter-spacing:2px;
+  margin-bottom:6px; margin-top:10px; text-transform:uppercase;
+}
+#sidebar h3:first-child { margin-top:0; }
+
+.ctrl-row { margin-bottom:8px; }
+.ctrl-row label {
+  font-size:9px; color:rgba(255,255,255,0.5); display:block; margin-bottom:2px;
+}
+.ctrl-row select {
+  width:100%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+  color:#fff; padding:3px 6px; font-family:inherit; font-size:10px; border-radius:3px;
+}
+
+.toggle-row {
+  display:flex; gap:4px; flex-wrap:wrap;
+}
+.toggle-btn {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:3px 8px; font-size:9px;
+  font-family:inherit; border-radius:3px; cursor:pointer; transition:all 0.15s;
+}
+.toggle-btn.active {
+  background:rgba(100,180,255,0.2); border-color:rgba(100,180,255,0.4); color:#6bf;
+}
+
+#bottom-panel {
+  position:fixed; bottom:0; left:0; right:0; height:120px;
+  background:rgba(8,8,16,0.95); border-top:1px solid rgba(255,255,255,0.08);
+  padding:10px 20px; z-index:5; display:flex; gap:20px;
+}
+.bottom-section {
+  display:flex; flex-direction:column; gap:4px;
+}
+.bottom-section label {
+  font-size:9px; color:rgba(255,255,255,0.4); letter-spacing:1px;
+}
+.bottom-section .desc {
+  font-size:8px; color:rgba(255,255,255,0.3); margin-top:2px;
+}
+
+input[type="range"] {
+  -webkit-appearance:none; width:180px; height:4px; background:rgba(255,255,255,0.15);
+  border-radius:2px; outline:none; cursor:pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:#6bf; cursor:pointer;
+}
+.val-display { font-size:10px; color:#6bf; font-weight:bold; }
+
+#tooltip {
+  position:fixed; display:none; background:rgba(0,0,0,0.92);
+  border:1px solid rgba(255,255,255,0.2); border-radius:6px;
+  padding:8px 12px; font-size:10px; color:#fff;
+  pointer-events:none; z-index:20; max-width:260px;
+}
+
+#loading {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:#fff; font-size:13px; letter-spacing:3px; opacity:0.6; z-index:5;
+}
+
+#navbar {
+  position:fixed; top:0; right:220px; z-index:15; display:flex; gap:2px;
+  padding:8px 4px;
+}
+.nav-item {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:5px 10px; font-size:10px;
+  font-family:'SF Mono',monospace; border-radius:4px; cursor:pointer;
+  transition:all 0.15s; text-decoration:none; letter-spacing:1px;
+}
+.nav-item:hover { background:rgba(255,255,255,0.12); color:#fff; }
+.nav-item.active { background:rgba(100,180,255,0.25); border-color:rgba(100,180,255,0.4); color:#6bf; }
+
+#info-readout {
+  position:fixed; top:42px; left:8px; z-index:5;
+  font-size:9px; color:rgba(255,255,255,0.4); pointer-events:none;
+  line-height:1.6;
+}
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="index.html">3D波浪</a>
+  <a class="nav-item" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="calendar.html">日历热力</a>
+  <a class="nav-item" href="state.html">温度计</a>
+  <a class="nav-item active" href="phase.html">相空间</a>
+    <a class="nav-item" href="marketstates.html">市场状态</a>
+      <a class="nav-item" href="marketscore.html">市场评分</a>
+        <a class="nav-item" href="liquidity.html">流动性</a>
+</div>
+
+<div id="hud">
+  <h1>A股相空间 · PHASE SPACE <span style="font-size:9px;color:#6bf">v2</span></h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="loading">LOADING DATA...</div>
+<div id="tooltip"></div>
+<div id="info-readout"></div>
+
+<canvas id="main-canvas"></canvas>
+
+<div id="sidebar">
+  <h3>坐标轴 AXES</h3>
+  <div class="ctrl-row">
+    <label>X轴</label>
+    <select id="xAxis">
+      <option value="mean_ret">日均收益率</option>
+      <option value="std_ret" selected>截面波动率</option>
+      <option value="total_amount">成交额</option>
+      <option value="up_pct">上涨占比</option>
+      <option value="skew">情绪偏度</option>
+    </select>
+  </div>
+  <div class="ctrl-row">
+    <label>Y轴</label>
+    <select id="yAxis">
+      <option value="mean_ret" selected>日均收益率</option>
+      <option value="std_ret">截面波动率</option>
+      <option value="total_amount">成交额</option>
+      <option value="up_pct">上涨占比</option>
+      <option value="skew">情绪偏度</option>
+    </select>
+  </div>
+
+  <h3>着色 COLOR</h3>
+  <div class="ctrl-row">
+    <select id="colorMode">
+      <option value="time">时间渐变</option>
+      <option value="regime" selected>市场状态</option>
+      <option value="return">涨跌幅</option>
+      <option value="vol">滚动波动率</option>
+    </select>
+  </div>
+
+  <h3>显示层 LAYERS</h3>
+  <div class="toggle-row">
+    <button class="toggle-btn active" id="toggleScatter">散点</button>
+    <button class="toggle-btn active" id="toggleFlow">速度场</button>
+    <button class="toggle-btn" id="toggleStream">流线</button>
+    <button class="toggle-btn" id="toggleTraj">轨迹</button>
+    <button class="toggle-btn active" id="toggleDensity">密度</button>
+    <button class="toggle-btn" id="toggleAttractor">吸引子</button>
+  </div>
+
+  <h3>速度场参数</h3>
+  <div class="ctrl-row">
+    <label>网格密度 <span class="val-display" id="gridVal">16</span></label>
+    <input type="range" id="gridSlider" min="8" max="32" step="2" value="16" style="width:140px;">
+  </div>
+</div>
+
+<div id="bottom-panel">
+  <div class="bottom-section">
+    <label>扩散噪声 σ = <span class="val-display" id="noiseVal">0.0</span> (逐步加噪，观察结构消失)</label>
+    <input type="range" id="noiseSlider" min="0" max="100" step="1" value="0" style="width:280px;">
+    <div class="desc">0 = 原始数据(清晰结构) → 100 = 纯噪声(结构完全消失)。模拟扩散模型的前向加噪过程。</div>
+  </div>
+
+  <div class="bottom-section">
+    <label>时间范围 <span class="val-display" id="rangeVal">全部</span></label>
+    <input type="range" id="rangeSlider" min="30" max="100" step="1" value="100" style="width:200px;">
+    <div class="desc">显示最近N%的交易日。拖动查看不同时段的状态空间分布。</div>
+  </div>
+
+  <div class="bottom-section">
+    <label>轨迹长度 <span class="val-display" id="trajVal">关闭</span></label>
+    <input type="range" id="trajSlider" min="0" max="60" step="5" value="0" style="width:140px;">
+    <div class="desc">连接最近N天的点，看市场在状态空间中的运动路径。</div>
+  </div>
+
+  <div class="bottom-section">
+    <label>散点大小 <span class="val-display" id="dotVal">2</span></label>
+    <input type="range" id="dotSlider" min="1" max="6" step="0.5" value="2" style="width:100px;">
+  </div>
+</div>
+
+<script>
+var DATA = null;
+var dailyData = null;
+var cfg = {
+  xAxis: 'std_ret', yAxis: 'mean_ret', colorMode: 'regime',
+  showScatter: true, showFlow: true, showStream: false,
+  showTraj: false, showDensity: true, showAttractor: false,
+  gridSize: 16, noise: 0, rangePct: 100, trajLen: 0, dotSize: 2
+};
+var canvas, ctx, w, h;
+var dataBounds = {};
+var flowField = null;
+var attractors = [];
+
+var METRIC_META = {
+  mean_ret: { label:'日均收益率', fmt:function(v){return (v*100).toFixed(2)+'%';} },
+  std_ret: { label:'截面波动率', fmt:function(v){return (v*100).toFixed(2)+'%';} },
+  total_amount: { label:'成交额', fmt:function(v){return (v/1e8).toFixed(0)+'亿';} },
+  up_pct: { label:'上涨占比', fmt:function(v){return (v*100).toFixed(1)+'%';} },
+  skew: { label:'情绪偏度', fmt:function(v){return (v*100).toFixed(3)+'%';} }
+};
+
+function loadData() {
+  fetch('data.json').then(function(r){ return r.json(); }).then(function(data){
+    DATA = data;
+    dailyData = DATA.daily;
+    document.getElementById('loading').style.display='none';
+    computeAndRender();
+  });
+}
+
+function getMetricVal(d, m) {
+  if (m === 'skew') return (d.mean_ret||0) - (d.median_ret||0);
+  if (m === 'up_pct') return d.up_pct != null ? d.up_pct : (d.n_up||0)/(d.n_stocks||1);
+  return d[m] || 0;
+}
+
+function classifyRegime(d, idx) {
+  var r = d.mean_ret || 0;
+  var s = d.std_ret || 0;
+  var up = getMetricVal(d, 'up_pct');
+  var win = 20;
+  var startIdx = Math.max(0, idx - win);
+  var rets = [];
+  for (var i = startIdx; i <= idx; i++) rets.push(dailyData[i].mean_ret || 0);
+  var mean = rets.reduce(function(a,b){return a+b;},0) / rets.length;
+  var variance = rets.reduce(function(s2,v){return s2+(v-mean)*(v-mean);},0) / rets.length;
+  var vol = Math.sqrt(variance) * Math.sqrt(252);
+  if (vol > 0.22 && r < -0.005) return { name:'恐慌', color:'#e6194B' };
+  if (vol > 0.22 && r > 0.005) return { name:'狂热', color:'#ff8800' };
+  if (vol < 0.12) return { name:'低波动', color:'#469990' };
+  if (s > 0.032) return { name:'分化', color:'#911eb4' };
+  if (r > 0.003 && up > 0.6) return { name:'强上行', color:'#3cb44b' };
+  if (r < -0.003 && up < 0.4) return { name:'弱下行', color:'#cc4444' };
+  return { name:'震荡', color:'#888899' };
+}
+
+function getRollingVol(idx) {
+  var win = 20;
+  var startI = Math.max(0, idx - win);
+  var rets = [];
+  for (var i = startI; i <= idx; i++) rets.push(dailyData[i].mean_ret || 0);
+  var mean = rets.reduce(function(a,b){return a+b;},0) / rets.length;
+  var variance = rets.reduce(function(s,v){return s+(v-mean)*(v-mean);},0) / rets.length;
+  return Math.sqrt(variance) * Math.sqrt(252);
+}
+
+function getColor(d, idx) {
+  if (cfg.colorMode === 'time') {
+    var t = idx / dailyData.length;
+    var r = Math.floor(100 + t*155), g = Math.floor(180 - t*100), b = Math.floor(255 - t*155);
+    return 'rgba('+r+','+g+','+b+',0.6)';
+  }
+  if (cfg.colorMode === 'regime') return classifyRegime(d, idx).color + 'b0';
+  if (cfg.colorMode === 'return') {
+    var v = d.mean_ret || 0;
+    var intensity = Math.min(Math.abs(v)/0.03, 1);
+    if (v > 0) return 'rgba(60,200,80,'+(0.3+intensity*0.6)+')';
+    return 'rgba(230,80,70,'+(0.3+intensity*0.6)+')';
+  }
+  if (cfg.colorMode === 'vol') {
+    var vol = getRollingVol(idx);
+    var intensity = Math.min(vol/0.3, 1);
+    return 'rgba(255,'+Math.floor(140-intensity*80)+','+Math.floor(30+intensity*20)+','+(0.3+intensity*0.6)+')';
+  }
+  return 'rgba(150,150,180,0.5)';
+}
+
+// ═════════════════════════════════════════
+// 数据准备 + 噪声注入
+// ═════════════════════════════════════════
+function prepareData() {
+  var n = dailyData.length;
+  var startIdx = cfg.rangePct < 100 ? Math.max(0, n - Math.floor(n * cfg.rangePct/100)) : 0;
+
+  // 原始值
+  var points = [];
+  for (var i = startIdx; i < n; i++) {
+    var xv = getMetricVal(dailyData[i], cfg.xAxis);
+    var yv = getMetricVal(dailyData[i], cfg.yAxis);
+    points.push({ x:xv, y:yv, dayIdx:i, d:dailyData[i] });
+  }
+
+  // 计算bounds (用全量数据, 不受rangePct影响, 保持坐标系稳定)
+  var allX = points.map(function(p){return p.x;});
+  var allY = points.map(function(p){return p.y;});
+  // 去掉极端1%避免坐标系被拉爆
+  allX.sort(function(a,b){return a-b;});
+  allY.sort(function(a,b){return a-b;});
+  var trim = Math.floor(allX.length * 0.005);
+  dataBounds = {
+    xMin: allX[trim] || allX[0],
+    xMax: allX[allX.length-1-trim] || allX[allX.length-1],
+    yMin: allY[trim] || allY[0],
+    yMax: allY[allY.length-1-trim] || allY[allY.length-1]
+  };
+  // 加一点padding
+  var xPad = (dataBounds.xMax - dataBounds.xMin) * 0.05;
+  var yPad = (dataBounds.yMax - dataBounds.yMin) * 0.05;
+  dataBounds.xMin -= xPad; dataBounds.xMax += xPad;
+  dataBounds.yMin -= yPad; dataBounds.yMax += yPad;
+
+  // 扩散噪声注入: x_noisy = x + σ * scale_x * N(0,1)
+  if (cfg.noise > 0) {
+    var sigma = cfg.noise / 100;
+    var xRange = dataBounds.xMax - dataBounds.xMin;
+    var yRange = dataBounds.yMax - dataBounds.yMin;
+    for (var j = 0; j < points.length; j++) {
+      // Box-Muller for Gaussian
+      var u1 = Math.random(), u2 = Math.random();
+      var z1 = Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2);
+      var z2 = Math.sqrt(-2*Math.log(u1)) * Math.sin(2*Math.PI*u2);
+      points[j].xNoisy = points[j].x + sigma * xRange * z1;
+      points[j].yNoisy = points[j].y + sigma * yRange * z2;
+    }
+  } else {
+    for (var k = 0; k < points.length; k++) {
+      points[k].xNoisy = points[k].x;
+      points[k].yNoisy = points[k].y;
+    }
+  }
+
+  return points;
+}
+
+function dataToScreen(dx, dy) {
+  var padL = 50, padR = 210, padT = 30, padB = 30;
+  var cw = w - padL - padR, ch = h - padT - padB;
+  var sx = padL + (dx - dataBounds.xMin) / (dataBounds.xMax - dataBounds.xMin) * cw;
+  var sy = padT + ch - (dy - dataBounds.yMin) / (dataBounds.yMax - dataBounds.yMin) * ch;
+  return { x:sx, y:sy };
+}
+
+// ═════════════════════════════════════════
+// Flow Field (Flow Matching 核心可视化)
+// ═════════════════════════════════════════
+function computeFlowField(points) {
+  var gs = cfg.gridSize;
+  var grid = [];
+  for (var i = 0; i < gs; i++) {
+    grid.push([]);
+    for (var j = 0; j < gs; j++) grid[i].push({ vx:0, vy:0, count:0, density:0 });
+  }
+
+  // 用原始位置(不加噪声)计算速度场
+  for (var k = 0; k < points.length; k++) {
+    var p = points[k];
+    // density
+    var gx = Math.floor((p.x - dataBounds.xMin) / (dataBounds.xMax - dataBounds.xMin) * gs);
+    var gy = Math.floor((p.y - dataBounds.yMin) / (dataBounds.yMax - dataBounds.yMin) * gs);
+    gx = Math.max(0, Math.min(gs-1, gx));
+    gy = Math.max(0, Math.min(gs-1, gy));
+    grid[gx][gy].density++;
+
+    // velocity = transition to next day
+    if (k < points.length - 1) {
+      var next = points[k+1];
+      var dx = next.x - p.x;
+      var dy = next.y - p.y;
+      grid[gx][gy].vx += dx;
+      grid[gx][gy].vy += dy;
+      grid[gx][gy].count++;
+    }
+  }
+
+  // average
+  for (var i2 = 0; i2 < gs; i2++) {
+    for (var j2 = 0; j2 < gs; j2++) {
+      if (grid[i2][j2].count > 0) {
+        grid[i2][j2].vx /= grid[i2][j2].count;
+        grid[i2][j2].vy /= grid[i2][j2].count;
+      }
+    }
+  }
+
+  return grid;
+}
+
+function drawFlowField(points) {
+  if (!flowField) return;
+  var gs = cfg.gridSize;
+  var xRange = dataBounds.xMax - dataBounds.xMin;
+  var yRange = dataBounds.yMax - dataBounds.yMin;
+  var maxMag = 0;
+
+  // find max magnitude for scaling
+  for (var i = 0; i < gs; i++) {
+    for (var j = 0; j < gs; j++) {
+      var cell = flowField[i][j];
+      if (cell.count >= 2) {
+        var mag = Math.sqrt(cell.vx*cell.vx + cell.vy*cell.vy);
+        if (mag > maxMag) maxMag = mag;
+      }
+    }
+  }
+  if (maxMag === 0) return;
+
+  // draw arrows
+  for (var i2 = 0; i2 < gs; i2++) {
+    for (var j2 = 0; j2 < gs; j2++) {
+      var c = flowField[i2][j2];
+      if (c.count < 2) continue;
+      var mag = Math.sqrt(c.vx*c.vx + c.vy*c.vy);
+      if (mag === 0) continue;
+
+      // cell center in data space
+      var cx = dataBounds.xMin + (i2 + 0.5) / gs * xRange;
+      var cy = dataBounds.yMin + (j2 + 0.5) / gs * yRange;
+      var s = dataToScreen(cx, cy);
+
+      // normalized direction
+      var normX = c.vx / mag;
+      var normY = c.vy / mag;
+      var len = 12 + (mag / maxMag) * 18;
+      var ex = s.x + normX * len;
+      var ey = s.y - normY * len; // screen Y is flipped
+
+      // color by magnitude
+      var intensity = mag / maxMag;
+      ctx.strokeStyle = 'rgba(255,180,80,' + (0.3 + intensity * 0.5) + ')';
+      ctx.lineWidth = 1 + intensity;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+
+      // arrowhead
+      var ang = Math.atan2(ey - s.y, ex - s.x);
+      var ah = 4;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - ah * Math.cos(ang - 0.4), ey - ah * Math.sin(ang - 0.4));
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - ah * Math.cos(ang + 0.4), ey - ah * Math.sin(ang + 0.4));
+      ctx.stroke();
+    }
+  }
+}
+
+// ═════════════════════════════════════════
+// Streamlines (流线 — 追踪速度场)
+// ═════════════════════════════════════════
+function drawStreamlines() {
+  if (!flowField) return;
+  var gs = cfg.gridSize;
+  var xRange = dataBounds.xMax - dataBounds.xMin;
+  var yRange = dataBounds.yMax - dataBounds.yMin;
+
+  function getVelocity(dx, dy) {
+    var gx = (dx - dataBounds.xMin) / xRange * gs;
+    var gy = (dy - dataBounds.yMin) / yRange * gs;
+    var gi = Math.floor(gx), gj = Math.floor(gy);
+    if (gi < 0 || gi >= gs || gj < 0 || gj >= gs) return null;
+    var c = flowField[gi][gj];
+    if (c.count < 2 || (c.vx === 0 && c.vy === 0)) return null;
+    return { vx:c.vx, vy:c.vy };
+  }
+
+  // seed points: grid of seeds
+  var seeds = [];
+  for (var si = 1; si < gs; si += 2) {
+    for (var sj = 1; sj < gs; sj += 2) {
+      seeds.push({
+        x: dataBounds.xMin + si / gs * xRange,
+        y: dataBounds.yMin + sj / gs * yRange
+      });
+    }
+  }
+
+  ctx.lineWidth = 1;
+  for (var s = 0; s < seeds.length; s++) {
+    var seed = seeds[s];
+    ctx.strokeStyle = 'rgba(100,180,255,0.25)';
+    ctx.beginPath();
+    var px = seed.x, py = seed.y;
+    var ps = dataToScreen(px, py);
+    ctx.moveTo(ps.x, ps.y);
+
+    var steps = 30;
+    var stepSize = xRange / gs * 0.4;
+    for (var st = 0; st < steps; st++) {
+      var v = getVelocity(px, py);
+      if (!v) break;
+      var mag = Math.sqrt(v.vx*v.vx + v.vy*v.vy);
+      if (mag === 0) break;
+      px += (v.vx / mag) * stepSize;
+      py += (v.vy / mag) * stepSize;
+      if (px < dataBounds.xMin || px > dataBounds.xMax || py < dataBounds.yMin || py > dataBounds.yMax) break;
+      var ns = dataToScreen(px, py);
+      ctx.lineTo(ns.x, ns.y);
+    }
+    ctx.stroke();
+  }
+}
+
+// ═════════════════════════════════════════
+// Density contour
+// ═════════════════════════════════════════
+function drawDensity(points) {
+  if (!flowField) return;
+  var gs = cfg.gridSize;
+  var xRange = dataBounds.xMax - dataBounds.xMin;
+  var yRange = dataBounds.yMax - dataBounds.yMin;
+  var maxD = 0;
+  for (var i = 0; i < gs; i++)
+    for (var j = 0; j < gs; j++)
+      if (flowField[i][j].density > maxD) maxD = flowField[i][j].density;
+  if (maxD === 0) return;
+
+  var cellW = (w - 50 - 210) / gs;
+  var cellH = (h - 30 - 30) / gs;
+  for (var i2 = 0; i2 < gs; i2++) {
+    for (var j2 = 0; j2 < gs; j2++) {
+      var d = flowField[i2][j2].density / maxD;
+      if (d < 0.05) continue;
+      var cx = dataBounds.xMin + (i2 + 0.5) / gs * xRange;
+      var cy = dataBounds.yMin + (j2 + 0.5) / gs * yRange;
+      var s = dataToScreen(cx, cy);
+      ctx.fillStyle = 'rgba(100,100,200,' + (d * 0.15) + ')';
+      ctx.fillRect(s.x - cellW/2, s.y - cellH/2, cellW, cellH);
+    }
+  }
+}
+
+// ═════════════════════════════════════════
+// Attractors (吸引子检测)
+// ═════════════════════════════════════════
+function detectAttractors(points) {
+  if (!flowField) return;
+  var gs = cfg.gridSize;
+  var xRange = dataBounds.xMax - dataBounds.xMin;
+  var yRange = dataBounds.yMax - dataBounds.yMin;
+
+  // find convergence points: where velocity magnitude is low but surrounding density is high
+  attractors = [];
+  for (var i = 0; i < gs; i++) {
+    for (var j = 0; j < gs; j++) {
+      var c = flowField[i][j];
+      if (c.density < 5) continue;
+      var mag = Math.sqrt(c.vx*c.vx + c.vy*c.vy);
+      // attractor = high density + low velocity (market tends to stay here)
+      if (mag < (xRange + yRange) / gs * 0.3 && c.density > 8) {
+        attractors.push({
+          x: dataBounds.xMin + (i+0.5)/gs * xRange,
+          y: dataBounds.yMin + (j+0.5)/gs * yRange,
+          density: c.density
+        });
+      }
+    }
+  }
+}
+
+function drawAttractors() {
+  for (var i = 0; i < attractors.length; i++) {
+    var s = dataToScreen(attractors[i].x, attractors[i].y);
+    ctx.strokeStyle = 'rgba(255,215,0,0.6)';
+    ctx.lineWidth = 1.5;
+    var r = 8 + Math.min(attractors[i].density / 10, 15);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, 2*Math.PI);
+    ctx.stroke();
+    // cross
+    ctx.beginPath();
+    ctx.moveTo(s.x - r-3, s.y); ctx.lineTo(s.x - r, s.y);
+    ctx.moveTo(s.x + r, s.y); ctx.lineTo(s.x + r+3, s.y);
+    ctx.moveTo(s.x, s.y - r-3); ctx.lineTo(s.x, s.y - r);
+    ctx.moveTo(s.x, s.y + r); ctx.lineTo(s.x, s.y + r+3);
+    ctx.stroke();
+    // label
+    ctx.fillStyle = 'rgba(255,215,0,0.5)';
+    ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('吸引子', s.x, s.y - r - 6);
+  }
+}
+
+// ═════════════════════════════════════════
+// Scatter
+// ═════════════════════════════════════════
+function drawScatter(points) {
+  for (var i = 0; i < points.length; i++) {
+    var p = points[i];
+    var s = dataToScreen(p.xNoisy, p.yNoisy);
+    ctx.fillStyle = getColor(p.d, p.dayIdx);
+    var sz = cfg.dotSize;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, sz, 0, 2*Math.PI);
+    ctx.fill();
+  }
+}
+
+// ═════════════════════════════════════════
+// Trajectory
+// ═════════════════════════════════════════
+function drawTrajectory(points) {
+  if (cfg.trajLen === 0) return;
+  var start = Math.max(0, points.length - cfg.trajLen);
+  ctx.lineWidth = 1.5;
+  for (var i = start; i < points.length - 1; i++) {
+    var s1 = dataToScreen(points[i].xNoisy, points[i].yNoisy);
+    var s2 = dataToScreen(points[i+1].xNoisy, points[i+1].yNoisy);
+    var alpha = (i - start) / (points.length - start);
+    ctx.strokeStyle = 'rgba(100,180,255,' + (0.1 + alpha * 0.7) + ')';
+    ctx.beginPath();
+    ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y);
+    ctx.stroke();
+  }
+  // mark current position
+  var last = points[points.length-1];
+  var ls = dataToScreen(last.xNoisy, last.yNoisy);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(ls.x, ls.y, 6, 0, 2*Math.PI);
+  ctx.stroke();
+}
+
+// ═════════════════════════════════════════
+// Axes
+// ═════════════════════════════════════════
+function drawAxes() {
+  var padL = 50, padR = 210, padT = 30, padB = 30;
+  var cw = w - padL - padR, ch = h - padT - padB;
+
+  // grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (var i = 0; i <= 8; i++) {
+    var x = padL + cw * i / 8;
+    var y = padT + ch * i / 8;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT+ch); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL+cw, y); ctx.stroke();
+  }
+
+  // zero lines
+  if (dataBounds.xMin < 0 && dataBounds.xMax > 0) {
+    var zx = dataToScreen(0, 0).x;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(zx, padT); ctx.lineTo(zx, padT+ch); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (dataBounds.yMin < 0 && dataBounds.yMax > 0) {
+    var zy = dataToScreen(0, 0).y;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(padL, zy); ctx.lineTo(padL+cw, zy); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // labels
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'right';
+  for (var yi = 0; yi <= 6; yi++) {
+    var dv = dataBounds.yMax - (dataBounds.yMax - dataBounds.yMin) * yi / 6;
+    var yp = padT + ch * yi / 6;
+    var lbl = METRIC_META[cfg.yAxis].fmt(dv);
+    ctx.fillText(lbl, padL - 4, yp + 3);
+  }
+  ctx.textAlign = 'center';
+  for (var xi = 0; xi <= 6; xi++) {
+    var dv2 = dataBounds.xMin + (dataBounds.xMax - dataBounds.xMin) * xi / 6;
+    var xp = padL + cw * xi / 6;
+    ctx.fillText(METRIC_META[cfg.xAxis].fmt(dv2), xp, padT + ch + 14);
+  }
+
+  // axis titles
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('→ ' + METRIC_META[cfg.xAxis].label, padL + cw/2, h - 8);
+  ctx.save();
+  ctx.translate(14, padT + ch/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText(METRIC_META[cfg.yAxis].label + ' ↑', 0, 0);
+  ctx.restore();
+}
+
+// ═════════════════════════════════════════
+// Main render
+// ═════════════════════════════════════════
+function computeAndRender() {
+  resizeCanvas();
+  var points = prepareData();
+  flowField = computeFlowField(points);
+  detectAttractors(points);
+  render(points);
+  updateInfoReadout(points);
+}
+
+function render(points) {
+  ctx.clearRect(0, 0, w, h);
+
+  // HUD
+  document.getElementById('hud-sub').textContent =
+    METRIC_META[cfg.xAxis].label + ' × ' + METRIC_META[cfg.yAxis].label +
+    ' · ' + points.length + '天 · 噪声σ=' + (cfg.noise/100).toFixed(2);
+
+  // draw order: density → flow → streamlines → scatter → trajectory → attractors → axes
+  if (cfg.showDensity) drawDensity(points);
+  if (cfg.showStream) drawStreamlines();
+  if (cfg.showFlow) drawFlowField(points);
+  if (cfg.showScatter) drawScatter(points);
+  if (cfg.showTraj) drawTrajectory(points);
+  if (cfg.showAttractor) drawAttractors();
+  drawAxes();
+}
+
+function resizeCanvas() {
+  canvas = document.getElementById('main-canvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  w = Math.floor(rect.width);
+  h = Math.floor(rect.height);
+  // 只设pixel buffer尺寸，不动CSS（CSS由position:fixed+top/right/bottom/left控制）
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);  // 覆盖式，不累积
+}
+
+function updateInfoReadout(points) {
+  // compute flow field stats
+  var totalCells = 0, activeCells = 0, convergenceCells = 0;
+  var gs = cfg.gridSize;
+  for (var i = 0; i < gs; i++) {
+    for (var j = 0; j < gs; j++) {
+      var c = flowField[i][j];
+      if (c.density > 0) totalCells++;
+      if (c.count >= 2) {
+        activeCells++;
+        var mag = Math.sqrt(c.vx*c.vx + c.vy*c.vy);
+        if (mag < 0.0001) convergenceCells++;
+      }
+    }
+  }
+  var el = document.getElementById('info-readout');
+  el.innerHTML = '速度场: ' + activeCells + '/' + totalCells + ' cells active<br>'
+    + '吸引子: ' + attractors.length + ' (收敛区域)<br>'
+    + '噪声σ: ' + (cfg.noise/100).toFixed(2)
+    + (cfg.noise > 50 ? ' ⚠ 结构已严重退化' : '')
+    + (cfg.noise > 80 ? ' ⚠ 几乎纯噪声' : '');
+}
+
+// ═════════════════════════════════════════
+// Hover
+// ═════════════════════════════════════════
+function onMove(event) {
+  var rect = canvas.getBoundingClientRect();
+  var mx = event.clientX - rect.left;
+  var my = event.clientY - rect.top;
+  var padL = 50, padR = 210, padT = 30, padB = 30;
+  var cw = w - padL - padR, ch = h - padT - padB;
+
+  // find nearest point
+  var nearest = null, minDist = 30;
+  var n = dailyData.length;
+  var startIdx = cfg.rangePct < 100 ? Math.max(0, n - Math.floor(n * cfg.rangePct/100)) : 0;
+  for (var i = startIdx; i < n; i++) {
+    var xv = getMetricVal(dailyData[i], cfg.xAxis);
+    var yv = getMetricVal(dailyData[i], cfg.yAxis);
+    var s = dataToScreen(xv, yv);
+    var dist = Math.sqrt((s.x-mx)*(s.x-mx) + (s.y-my)*(s.y-my));
+    if (dist < minDist) { minDist = dist; nearest = i; }
+  }
+
+  var tt = document.getElementById('tooltip');
+  if (nearest === null) { tt.style.display = 'none'; return; }
+
+  var d = dailyData[nearest];
+  var rg = classifyRegime(d, nearest);
+  var up = getMetricVal(d, 'up_pct');
+  var skew = (d.mean_ret||0) - (d.median_ret||0);
+
+  tt.style.display = 'block';
+  tt.style.left = (event.clientX + 14) + 'px';
+  tt.style.top = (event.clientY + 14) + 'px';
+  tt.innerHTML =
+    '<b style="color:#6bf">' + d.date_str + '</b> '
+    + '<span style="color:' + rg.color + '">' + rg.name + '</span><br>'
+    + '日均收益: <b>' + (d.mean_ret*100).toFixed(2) + '%</b><br>'
+    + '中位收益: ' + ((d.median_ret||0)*100).toFixed(2) + '%<br>'
+    + '截面波动: ' + ((d.std_ret||0)*100).toFixed(2) + '%<br>'
+    + '上涨占比: ' + (up*100).toFixed(1) + '% (' + (d.n_up||0) + '/' + (d.n_stocks||0) + ')<br>'
+    + '情绪偏度: ' + (skew*100).toFixed(3) + '%<br>'
+    + '成交额: ' + ((d.total_amount||0)/1e8).toFixed(0) + '亿<br>'
+    + METRIC_META[cfg.xAxis].label + ': <b>' + METRIC_META[cfg.xAxis].fmt(getMetricVal(d,cfg.xAxis)) + '</b><br>'
+    + METRIC_META[cfg.yAxis].label + ': <b>' + METRIC_META[cfg.yAxis].fmt(getMetricVal(d,cfg.yAxis)) + '</b>';
+}
+
+// ═════════════════════════════════════════
+// INIT
+// ═════════════════════════════════════════
+function init() {
+  // axis selectors
+  document.getElementById('xAxis').addEventListener('change', function(e){ cfg.xAxis=e.target.value; computeAndRender(); });
+  document.getElementById('yAxis').addEventListener('change', function(e){ cfg.yAxis=e.target.value; computeAndRender(); });
+  document.getElementById('colorMode').addEventListener('change', function(e){ cfg.colorMode=e.target.value; computeAndRender(); });
+
+  // toggles
+  function bindToggle(id, key) {
+    document.getElementById(id).addEventListener('click', function(e){
+      cfg[key] = !cfg[key];
+      e.target.classList.toggle('active');
+      computeAndRender();
+    });
+  }
+  bindToggle('toggleScatter', 'showScatter');
+  bindToggle('toggleFlow', 'showFlow');
+  bindToggle('toggleStream', 'showStream');
+  bindToggle('toggleTraj', 'showTraj');
+  bindToggle('toggleDensity', 'showDensity');
+  bindToggle('toggleAttractor', 'showAttractor');
+
+  // sliders
+  document.getElementById('gridSlider').addEventListener('input', function(e){
+    cfg.gridSize = parseInt(e.target.value);
+    document.getElementById('gridVal').textContent = cfg.gridSize;
+    computeAndRender();
+  });
+  document.getElementById('noiseSlider').addEventListener('input', function(e){
+    cfg.noise = parseInt(e.target.value);
+    document.getElementById('noiseVal').textContent = (cfg.noise/100).toFixed(2);
+    computeAndRender();
+  });
+  document.getElementById('rangeSlider').addEventListener('input', function(e){
+    cfg.rangePct = parseInt(e.target.value);
+    document.getElementById('rangeVal').textContent = cfg.rangePct === 100 ? '全部' : cfg.rangePct + '%';
+    computeAndRender();
+  });
+  document.getElementById('trajSlider').addEventListener('input', function(e){
+    cfg.trajLen = parseInt(e.target.value);
+    document.getElementById('trajVal').textContent = cfg.trajLen === 0 ? '关闭' : cfg.trajLen + '天';
+    computeAndRender();
+  });
+  document.getElementById('dotSlider').addEventListener('input', function(e){
+    cfg.dotSize = parseFloat(e.target.value);
+    document.getElementById('dotVal').textContent = cfg.dotSize;
+    computeAndRender();
+  });
+
+  canvas = document.getElementById('main-canvas');
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseleave', function(){ document.getElementById('tooltip').style.display='none'; });
+  window.addEventListener('resize', function(){ computeAndRender(); });
+
+  loadData();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else { init(); }
+</script>
+</body>
+</html>

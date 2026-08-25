@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股资金迁移 · Sankey</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a12; overflow:hidden; font-family:'SF Mono','Monaco','Menlo',monospace; }
+canvas { display:block; }
+
+#hud {
+  position:fixed; top:0; left:0; width:100%; padding:14px 20px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.85) 0%, transparent 100%);
+  color:#fff; pointer-events:none; z-index:10;
+}
+#hud h1 { font-size:15px; font-weight:300; letter-spacing:3px; opacity:0.9; }
+#hud .sub { font-size:10px; opacity:0.4; margin-top:2px; letter-spacing:1px; }
+
+#controls {
+  position:fixed; bottom:0; left:0; width:100%; padding:12px 20px;
+  background:linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; z-index:10; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;
+}
+.ctrl-group { display:flex; flex-direction:column; gap:3px; }
+.ctrl-group label { font-size:9px; opacity:0.5; letter-spacing:1px; text-transform:uppercase; white-space:nowrap; }
+.ctrl-group select, .ctrl-group button {
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+  color:#fff; padding:4px 8px; font-family:inherit; font-size:11px;
+  border-radius:4px; cursor:pointer; transition:all 0.15s;
+}
+.ctrl-group select:hover, .ctrl-group button:hover { background:rgba(255,255,255,0.15); }
+.ctrl-group button.active { background:rgba(100,180,255,0.3); border-color:rgba(100,180,255,0.5); }
+.ctrl-group input[type="range"] {
+  -webkit-appearance:none; width:100px; height:4px; background:rgba(255,255,255,0.15);
+  border-radius:2px; outline:none; cursor:pointer;
+}
+.ctrl-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:#6bf; cursor:pointer;
+}
+.val-display { font-size:10px; opacity:0.7; min-width:30px; text-align:center; }
+
+#tooltip {
+  position:fixed; display:none; background:rgba(0,0,0,0.92);
+  border:1px solid rgba(255,255,255,0.2); border-radius:6px;
+  padding:8px 12px; font-size:11px; color:#fff;
+  pointer-events:none; z-index:20; min-width:180px;
+}
+#tooltip .tt-title { font-size:12px; font-weight:bold; margin-bottom:4px; }
+#tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; opacity:0.8; }
+#tooltip .tt-val { color:#6bf; font-weight:bold; }
+
+#loading {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:#fff; font-size:13px; letter-spacing:3px; opacity:0.6; z-index:5;
+}
+
+#navbar {
+  position:fixed; top:0; right:0; z-index:15; display:flex; gap:2px;
+  padding:8px 16px;
+}
+.nav-item {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:5px 12px; font-size:10px;
+  font-family:'SF Mono',monospace; border-radius:4px; cursor:pointer;
+  transition:all 0.15s; text-decoration:none; letter-spacing:1px;
+}
+.nav-item:hover { background:rgba(255,255,255,0.12); color:#fff; }
+.nav-item.active { background:rgba(100,180,255,0.25); border-color:rgba(100,180,255,0.4); color:#6bf; }
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="index.html">3D波浪</a>
+  <a class="nav-item" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="phase.html">相空间</a>
+    <a class="nav-item" href="marketstates.html">市场状态</a>
+      <a class="nav-item" href="marketscore.html">市场评分</a>
+        <a class="nav-item" href="liquidity.html">流动性</a>
+  <a class="nav-item active" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="state.html">温度计</a>
+  <a class="nav-item" href="calendar.html">日历热力</a>
+</div>
+
+<div id="hud">
+  <h1>A股资金迁移 · Sankey</h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="loading">LOADING DATA...</div>
+<div id="tooltip"></div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <label>颗粒度 GRANULARITY</label>
+    <select id="granularity">
+      <option value="year" selected>按年</option>
+      <option value="quarter">按季</option>
+      <option value="month">按月</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>起始</label>
+    <select id="dateStart"></select>
+  </div>
+  <div class="ctrl-group">
+    <label>结束</label>
+    <select id="dateEnd"></select>
+  </div>
+  <div class="ctrl-group">
+    <label>显示TOP</label>
+    <select id="topN">
+      <option value="8">前8行业</option>
+      <option value="12">前12行业</option>
+      <option value="18">前18行业</option>
+      <option value="26" selected>全部行业</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>流透明度 <span class="val-display" id="flowAlphaVal">0.35</span></label>
+    <input type="range" id="flowAlpha" min="0.05" max="0.8" step="0.05" value="0.35">
+  </div>
+  <div class="ctrl-group">
+    <label>曲度 CURVE <span class="val-display" id="curveVal">0.5</span></label>
+    <input type="range" id="curveSlider" min="0" max="1" step="0.1" value="0.5">
+  </div>
+  <div class="ctrl-group">
+    <label>排序 SORT</label>
+    <select id="sortMode">
+      <option value="total" selected>按时均成交额</option>
+      <option value="alpha">按名称</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>颜色 COLOR</label>
+    <select id="colorMode">
+      <option value="industry" selected>行业色</option>
+      <option value="ret">涨跌幅</option>
+      <option value="growth">增长/萎缩</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>缩放 ZOOM</label>
+    <span style="font-size:9px;opacity:0.5;display:block;line-height:1.4">滚轮缩放 · 拖拽平移<br>双击重置</span>
+  </div>
+</div>
+
+<script>
+var DATA = null;
+var canvas, ctx;
+var W, H;
+var cfg = {
+  granularity:'year', dateStart:null, dateEnd:null,
+  topN:26, flowAlpha:0.35, curve:0.5, sortMode:'total', colorMode:'industry'
+};
+var renderData = null;
+var hoverItem = null;
+var allPeriods = [];
+
+// 缩放/平移状态
+var zoomState = { scale: 1, offsetX: 0, offsetY: 0, dragging: false, lastX: 0, lastY: 0 };
+
+var PALETTE = [
+  '#4363d8','#3cb44b','#e6194B','#f58231','#911eb4','#42d4f4','#f032e6',
+  '#469990','#9A6324','#ffe119','#800000','#808000','#000075','#a9a9a9',
+  '#aaffc3','#ffd8b1','#fabed4','#dcbeff','#bfef45','#fb8072','#80b1d3',
+  '#fdb462','#b3de69','#fccde5','#d9d9d9','#bc80bd'
+];
+
+// ═════════════════════════════════════════
+// DATA
+// ═════════════════════════════════════════
+function loadData() {
+  fetch('data.json')
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(data){
+      DATA = data;
+      buildPeriodOptions();
+      document.getElementById('loading').style.display='none';
+      render();
+    })
+    .catch(function(err){
+      document.getElementById('loading').textContent = 'Error: '+err.message;
+    });
+}
+
+function getPeriodKey(dateStr) {
+  if (cfg.granularity === 'year') return dateStr.slice(0,4);
+  if (cfg.granularity === 'quarter') {
+    var m = parseInt(dateStr.slice(5,7));
+    return dateStr.slice(0,4) + 'Q' + (Math.floor((m-1)/3)+1);
+  }
+  return dateStr.slice(0,7); // month: YYYY-MM
+}
+
+function getPeriodLabel(key) {
+  if (cfg.granularity === 'year') return key;
+  if (cfg.granularity === 'quarter') return key.replace('Q',' Q');
+  // month
+  return key.replace('-','/');
+}
+
+function buildPeriodOptions() {
+  // 收集所有period
+  var periodSet = {};
+  for (var i = 0; i < DATA.industry.length; i++) {
+    var pk = getPeriodKey(DATA.industry[i].date_str);
+    periodSet[pk] = true;
+  }
+  allPeriods = Object.keys(periodSet).sort();
+  
+  // 填充select
+  var selS = document.getElementById('dateStart');
+  var selE = document.getElementById('dateEnd');
+  selS.innerHTML = ''; selE.innerHTML = '';
+  for (var j = 0; j < allPeriods.length; j++) {
+    var opt1 = document.createElement('option');
+    opt1.value = allPeriods[j]; opt1.textContent = getPeriodLabel(allPeriods[j]);
+    selS.appendChild(opt1);
+    var opt2 = document.createElement('option');
+    opt2.value = allPeriods[j]; opt2.textContent = getPeriodLabel(allPeriods[j]);
+    selE.appendChild(opt2);
+  }
+  // 默认: 第一个到最后一个
+  cfg.dateStart = allPeriods[0];
+  cfg.dateEnd = allPeriods[allPeriods.length-1];
+  selS.value = cfg.dateStart;
+  selE.value = cfg.dateEnd;
+}
+
+// 计算每个period的各行业日均成交额
+function getPeriodData(periodKey) {
+  var indAmt = {}, indRet = {}, daysCount = {};
+  for (var i = 0; i < DATA.industry.length; i++) {
+    var r = DATA.industry[i];
+    if (getPeriodKey(r.date_str) !== periodKey) continue;
+    if (!indAmt[r.industry]) { indAmt[r.industry]=0; indRet[r.industry]=0; daysCount[r.industry]=0; }
+    indAmt[r.industry] += r.total_amount || 0;
+    indRet[r.industry] += r.mean_ret || 0;
+    daysCount[r.industry]++;
+  }
+  var result = {};
+  var total = 0;
+  for (var ind in indAmt) {
+    var d = daysCount[ind];
+    var amt = indAmt[ind] / d / 1e8; // 日均(亿)
+    result[ind] = { amount: amt, ret: indRet[ind]/d, share: 0 };
+    total += amt;
+  }
+  for (var ind2 in result) result[ind2].share = result[ind2].amount / Math.max(total, 0.001);
+  return result;
+}
+
+// ═════════════════════════════════════════
+// RENDER
+// ═════════════════════════════════════════
+function render() {
+  if (!DATA || !cfg.dateStart || !cfg.dateEnd) return;
+  W = canvas.width; H = canvas.height;
+
+  // 1. 选时间轴上的periods
+  var periods = [];
+  var inRange = false;
+  for (var i = 0; i < allPeriods.length; i++) {
+    if (allPeriods[i] === cfg.dateStart) inRange = true;
+    if (inRange) periods.push(allPeriods[i]);
+    if (allPeriods[i] === cfg.dateEnd) break;
+  }
+  if (periods.length < 2) return;
+  var nCols = periods.length;
+
+  // 2. 收集所有行业
+  var indSet = {};
+  for (var p = 0; p < nCols; p++) {
+    var pd = getPeriodData(periods[p]);
+    for (var ind in pd) indSet[ind] = true;
+  }
+  var allInds = Object.keys(indSet);
+
+  // 3. 排序: 按(跨所有period的)平均成交额
+  if (cfg.sortMode === 'total') {
+    var indTotals = [];
+    for (var i2 = 0; i2 < allInds.length; i2++) {
+      var sum = 0;
+      for (var p2 = 0; p2 < nCols; p2++) {
+        var pd2 = getPeriodData(periods[p2]);
+        sum += (pd2[allInds[i2]] || {amount:0}).amount;
+      }
+      indTotals.push({name: allInds[i2], val: sum});
+    }
+    indTotals.sort(function(a,b){ return b.val - a.val; });
+    allInds = indTotals.map(function(t){return t.name;});
+  } else {
+    allInds.sort();
+  }
+
+  // 4. TOP N
+  if (cfg.topN < allInds.length) allInds = allInds.slice(0, parseInt(cfg.topN));
+
+  // 5. 构建节点矩阵
+  // nodes[colIdx][indIdx] = {x, y, h, amount, ret, share, industry, period}
+  var padL = 100, padR = 100, padT = 40, padB = 80;
+  var colGap = (W - padL - padR) / Math.max(nCols - 1, 1);
+  var nodeW = 8;
+  var availH = H - padT - padB;
+  var gap = 2;
+  var totalGap = gap * (allInds.length - 1);
+  var usableH = availH - totalGap;
+
+  // 每列独立归一化（占比→高度）
+  var periodDataCache = [];
+  for (var pc = 0; pc < nCols; pc++) periodDataCache.push(getPeriodData(periods[pc]));
+
+  var nodes = []; // nodes[col][indIdx]
+  for (var c = 0; c < nCols; c++) {
+    var colNodes = [];
+    var x = padL + c * colGap;
+    var y = padT;
+    for (var ii = 0; ii < allInds.length; ii++) {
+      var ind = allInds[ii];
+      var pd3 = periodDataCache[c];
+      var d3 = pd3[ind] || {amount:0, ret:0, share:0};
+      var h = d3.share * usableH;
+      colNodes.push({
+        x: x, y: y, h: Math.max(h, 1), w: nodeW,
+        industry: ind, period: periods[c], idx: ii,
+        amount: d3.amount, ret: d3.ret, share: d3.share,
+        colorIdx: ii
+      });
+      y += h + gap;
+    }
+    nodes.push(colNodes);
+  }
+
+  // 6. 构建流 (相邻列间)
+  var flows = []; // {fromCol, toCol, indIdx, fromNode, toNode, amount, delta, color, colorIdx}
+  for (var fc = 0; fc < nCols - 1; fc++) {
+    for (var fi = 0; fi < allInds.length; fi++) {
+      var fromNode = nodes[fc][fi];
+      var toNode = nodes[fc+1][fi];
+      if (!fromNode || !toNode) continue;
+      var delta = toNode.amount - fromNode.amount;
+      flows.push({
+        fromCol: fc, toCol: fc+1, indIdx: fi,
+        from: fromNode, to: toNode,
+        delta: delta,
+        grow: delta > 0,
+        colorIdx: fi,
+        industry: fromNode.industry
+      });
+    }
+  }
+
+  renderData = { nodes: nodes, flows: flows, periods: periods, allInds: allInds };
+  draw();
+}
+
+function getFlowColor(flow) {
+  if (cfg.colorMode === 'industry') return PALETTE[flow.colorIdx % PALETTE.length];
+  if (cfg.colorMode === 'ret') return flow.from.ret > 0 ? '#3cb44b' : '#e6194B';
+  if (cfg.colorMode === 'growth') return flow.grow ? '#3cb44b' : '#e6194B';
+  return PALETTE[flow.colorIdx % PALETTE.length];
+}
+
+// 贝塞尔曲线Y值
+function bezierY(t, y0, y1, curveFactor) {
+  // 三次贝塞尔，控制点在水平方向，y等于端点y
+  // P0=(x0,y0), P1=(x0+(x1-x0)*curve,y0), P2=(x1-(x1-x0)*curve,y1), P3=(x1,y1)
+  // 实际用二次近似: 在t=0.5时y≈(y0+y1)/2，但控制点y不同会弯曲
+  // 简化：用线性插值 + 弯曲修正
+  var linearY = y0 + (y1-y0) * t;
+  return linearY; // 控制点y与端点相同，所以实际上就是直线——不对
+}
+
+// 正确的三次贝塞尔（4个控制点）
+function cubicBezier(t, p0, p1, p2, p3) {
+  var mt = 1 - t;
+  return mt*mt*mt*p0 + 3*mt*mt*t*p1 + 3*mt*t*t*p2 + t*t*t*p3;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+  if (!renderData) return;
+
+  // 应用缩放/平移变换
+  ctx.save();
+  ctx.translate(zoomState.offsetX, zoomState.offsetY);
+  ctx.scale(zoomState.scale, zoomState.scale);
+
+  var rd = renderData;
+  var nCols = rd.periods.length;
+
+  // === 1. 绘制流 (先画流，再画节点覆盖) ===
+  for (var fi = 0; fi < rd.flows.length; fi++) {
+    var f = rd.flows[fi];
+    var nA = f.from, nB = f.to;
+
+    // 流的粗细 = min(from.h, to.h) * 0.8
+    var flowH = Math.min(nA.h, nB.h) * 0.85;
+    if (flowH < 0.5) continue;
+
+    // 阈值过滤: 流太小不画
+    var maxNodeH = Math.max(nA.h, nB.h);
+    if (maxNodeH < 3) continue;
+
+    var x0 = nA.x + nA.w;
+    var x1 = nB.x;
+    var y0 = nA.y + nA.h / 2;
+    var y1 = nB.y + nB.h / 2;
+
+    // 贝塞尔控制点
+    var cpOffset = (x1 - x0) * cfg.curve;
+    var cpx1 = x0 + cpOffset, cpx2 = x1 - cpOffset;
+
+    // 画上下两条贝塞尔曲线，中间填充
+    var halfH = flowH / 2;
+    var color = getFlowColor(f);
+
+    // hover高亮
+    var alpha = cfg.flowAlpha;
+    var isHovered = hoverItem && hoverItem.industry === f.industry;
+    if (hoverItem) alpha = isHovered ? Math.min(cfg.flowAlpha * 2.5, 0.9) : cfg.flowAlpha * 0.15;
+
+    // 构建填充路径（上下偏移halfH）
+    ctx.beginPath();
+    // 上边线
+    for (var s = 0; s <= 30; s++) {
+      var t = s / 30;
+      var bx = cubicBezier(t, x0, cpx1, cpx2, x1);
+      var by = cubicBezier(t, y0 - halfH, y0 - halfH, y1 - halfH, y1 - halfH);
+      if (s === 0) ctx.moveTo(bx, by); else ctx.lineTo(bx, by);
+    }
+    // 下边线（反向）
+    for (var s2 = 30; s2 >= 0; s2--) {
+      var t2 = s2 / 30;
+      var bx2 = cubicBezier(t2, x0, cpx1, cpx2, x1);
+      var by2 = cubicBezier(t2, y0 + halfH, y0 + halfH, y1 + halfH, y1 + halfH);
+      ctx.lineTo(bx2, by2);
+    }
+    ctx.closePath();
+
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+
+    // hover时画中线
+    if (isHovered) {
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (var s3 = 0; s3 <= 30; s3++) {
+        var t3 = s3 / 30;
+        var bx3 = cubicBezier(t3, x0, cpx1, cpx2, x1);
+        var by3 = cubicBezier(t3, y0, y0, y1, y1);
+        if (s3 === 0) ctx.moveTo(bx3, by3); else ctx.lineTo(bx3, by3);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // === 2. 绘制节点 ===
+  for (var c = 0; c < nCols; c++) {
+    var colNodes = rd.nodes[c];
+    for (var ni = 0; ni < colNodes.length; ni++) {
+      var nd = colNodes[ni];
+      if (nd.h < 1) continue;
+      var color = PALETTE[nd.colorIdx % PALETTE.length];
+
+      // hover dimming
+      var ndAlpha = 1;
+      if (hoverItem && hoverItem.industry !== nd.industry) ndAlpha = 0.25;
+
+      ctx.globalAlpha = ndAlpha;
+      ctx.fillStyle = color;
+      ctx.fillRect(nd.x, nd.y, nd.w, nd.h);
+
+      // 标签
+      if (nd.h > 8) {
+        ctx.font = nd.h > 16 ? 'bold 10px monospace' : '9px monospace';
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = ndAlpha * 0.85;
+        // 只在第一列和最后一列写行业名
+        if (c === 0) {
+          ctx.textAlign = 'right';
+          ctx.fillText(nd.industry, nd.x - 4, nd.y + nd.h / 2 + 3);
+        } else if (c === nCols - 1) {
+          ctx.textAlign = 'left';
+          ctx.fillText(nd.industry, nd.x + nd.w + 4, nd.y + nd.h / 2 + 3);
+        }
+        // 每列写金额（如果够高）
+        if (nd.h > 14) {
+          ctx.font = '8px monospace';
+          ctx.globalAlpha = ndAlpha * 0.4;
+          ctx.textAlign = 'center';
+          ctx.fillText(nd.amount.toFixed(0), nd.x + nd.w / 2, nd.y + nd.h / 2 + 3);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // === 3. 列标题 ===
+  ctx.font = 'bold 12px monospace';
+  ctx.fillStyle = '#6bf';
+  ctx.textAlign = 'center';
+  var padL = 100;
+  var colGap = (W - 200) / Math.max(nCols - 1, 1);
+  for (var ci = 0; ci < nCols; ci++) {
+    var cx = padL + ci * colGap + 4;
+    var label = getPeriodLabel(rd.periods[ci]);
+    ctx.fillText(label, cx, 28);
+  }
+
+  // === 4. hover行业标签（中间列） ===
+  if (hoverItem) {
+    // 在hover行业所在的所有列上标注行业名
+    for (var hc = 0; hc < nCols; hc++) {
+      var hNodes = rd.nodes[hc];
+      for (var hi = 0; hi < hNodes.length; hi++) {
+        var hNd = hNodes[hi];
+        if (hNd.industry === hoverItem.industry && hNd.h > 1) {
+          ctx.font = 'bold 10px monospace';
+          ctx.fillStyle = PALETTE[hNd.colorIdx % PALETTE.length];
+          ctx.textAlign = 'center';
+          ctx.globalAlpha = 0.9;
+          var lbl = hNd.industry + ' ' + hNd.amount.toFixed(0) + '亿';
+          ctx.fillText(lbl, hNd.x + hNd.w / 2, hNd.y - 4);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+  }
+
+  // HUD
+  var sub = document.getElementById('hud-sub');
+  var gran = cfg.granularity === 'year' ? '年' : (cfg.granularity === 'quarter' ? '季' : '月');
+  sub.textContent = gran + '度 · ' + nCols + '个时段 · ' + rd.allInds.length + '行业 · '
+    + getPeriodLabel(rd.periods[0]) + ' → ' + getPeriodLabel(rd.periods[nCols-1]);
+
+  ctx.restore(); // 结束缩放变换
+}
+
+// ═════════════════════════════════════════
+// INTERACTION
+// ═════════════════════════════════════════
+function onMouseMove(event) {
+  if (!renderData) return;
+  var rect = canvas.getBoundingClientRect();
+  var mx = (event.clientX - rect.left - zoomState.offsetX) / zoomState.scale;
+  var my = (event.clientY - rect.top - zoomState.offsetY) / zoomState.scale;
+
+  // 如果在拖拽中，不处理hover
+  if (zoomState.dragging) return;
+
+  // 检测节点
+  var found = null;
+  for (var c = 0; c < renderData.nodes.length && !found; c++) {
+    for (var ni = 0; ni < renderData.nodes[c].length; ni++) {
+      var nd = renderData.nodes[c][ni];
+      if (mx >= nd.x - 3 && mx <= nd.x + nd.w + 3 && my >= nd.y && my <= nd.y + nd.h) {
+        found = { type: 'node', node: nd, industry: nd.industry };
+        break;
+      }
+    }
+  }
+
+  // 检测流（近似：鼠标在两列之间时，找最近的流）
+  if (!found) {
+    var nCols = renderData.periods.length;
+    var padL = 100;
+    var colGap = (W - 200) / Math.max(nCols - 1, 1);
+    // 确定在哪两列之间
+    var colF = (mx - padL) / colGap;
+    if (colF >= 0 && colF < nCols - 1) {
+      var fc = Math.floor(colF);
+      // 检查这个col间隔的每条流
+      for (var fi = 0; fi < renderData.flows.length; fi++) {
+        var f = renderData.flows[fi];
+        if (f.fromCol !== fc) continue;
+        var x0 = f.from.x + f.from.w, x1 = f.to.x;
+        var y0 = f.from.y + f.from.h/2, y1 = f.to.y + f.to.h/2;
+        var cpx1 = x0 + (x1-x0)*cfg.curve, cpx2 = x1 - (x1-x0)*cfg.curve;
+        var t = (mx - x0) / (x1 - x0);
+        if (t < 0 || t > 1) continue;
+        var cy = cubicBezier(t, y0, y0, y1, y1);
+        var halfH = Math.min(f.from.h, f.to.h) * 0.85 / 2;
+        if (Math.abs(my - cy) < halfH + 3) {
+          found = { type: 'flow', flow: f, industry: f.industry };
+          break;
+        }
+      }
+    }
+  }
+
+  hoverItem = found;
+  var tt = document.getElementById('tooltip');
+
+  if (found) {
+    tt.style.display = 'block';
+    tt.style.left = Math.min(event.clientX + 15, W - 200) + 'px';
+    tt.style.top = (event.clientY + 15) + 'px';
+
+    if (found.type === 'node') {
+      var nd = found.node;
+      var color = PALETTE[nd.colorIdx % PALETTE.length];
+      var html = '<div class="tt-title" style="color:' + color + '">' + nd.industry + '</div>';
+      html += '<div class="tt-row"><span>时段</span><span class="tt-val">' + getPeriodLabel(nd.period) + '</span></div>';
+      html += '<div class="tt-row"><span>日均成交额</span><span class="tt-val">' + nd.amount.toFixed(1) + '亿</span></div>';
+      html += '<div class="tt-row"><span>市场份额</span><span class="tt-val">' + (nd.share * 100).toFixed(1) + '%</span></div>';
+      html += '<div class="tt-row"><span>日均收益</span><span class="tt-val">' + (nd.ret * 100).toFixed(3) + '%</span></div>';
+      tt.innerHTML = html;
+    } else {
+      var f2 = found.flow;
+      var pct = f2.delta / Math.max(f2.from.amount, 0.001) * 100;
+      var html = '<div class="tt-title" style="color:' + PALETTE[f2.colorIdx % PALETTE.length] + '">' + f2.industry + '</div>';
+      html += '<div class="tt-row"><span>' + getPeriodLabel(f2.from.period) + '</span><span class="tt-val">' + f2.from.amount.toFixed(1) + '亿</span></div>';
+      html += '<div class="tt-row"><span>' + getPeriodLabel(f2.to.period) + '</span><span class="tt-val">' + f2.to.amount.toFixed(1) + '亿</span></div>';
+      html += '<div class="tt-row"><span>变化</span><span class="tt-val" style="color:' + (pct > 0 ? '#3cb44b' : '#e6194B') + '">' + (pct > 0 ? '+' : '') + pct.toFixed(1) + '%</span></div>';
+      tt.innerHTML = html;
+    }
+    draw();
+  } else {
+    tt.style.display = 'none';
+    draw();
+  }
+}
+
+function onMouseLeave() {
+  hoverItem = null;
+  document.getElementById('tooltip').style.display = 'none';
+  if (renderData) draw();
+}
+
+function onResize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  W = canvas.width; H = canvas.height;
+  if (DATA) render();
+}
+
+// ═════════════════════════════════════════
+// INIT
+// ═════════════════════════════════════════
+function init() {
+  canvas = document.createElement('canvas');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  ctx = canvas.getContext('2d');
+  W = canvas.width; H = canvas.height;
+
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseleave', onMouseLeave);
+
+  // 滚轮缩放
+  canvas.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var mx = event.clientX - rect.left;
+    var my = event.clientY - rect.top;
+    var factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+    var newScale = Math.max(0.3, Math.min(8, zoomState.scale * factor));
+    // 以鼠标位置为中心缩放
+    zoomState.offsetX = mx - (mx - zoomState.offsetX) * (newScale / zoomState.scale);
+    zoomState.offsetY = my - (my - zoomState.offsetY) * (newScale / zoomState.scale);
+    zoomState.scale = newScale;
+    draw();
+  }, { passive: false });
+
+  // 拖拽平移
+  canvas.addEventListener('mousedown', function(e) {
+    zoomState.dragging = true;
+    zoomState.lastX = e.clientX;
+    zoomState.lastY = e.clientY;
+    canvas.style.cursor = 'grabbing';
+  });
+  canvas.addEventListener('mouseup', function(e) {
+    zoomState.dragging = false;
+    canvas.style.cursor = '';
+    // 拖拽结束后清hover
+    hoverItem = null;
+    document.getElementById('tooltip').style.display = 'none';
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    if (zoomState.dragging) {
+      zoomState.offsetX += e.clientX - zoomState.lastX;
+      zoomState.offsetY += e.clientY - zoomState.lastY;
+      zoomState.lastX = e.clientX;
+      zoomState.lastY = e.clientY;
+      draw();
+    }
+  });
+
+  // 双击重置
+  canvas.addEventListener('dblclick', function() {
+    zoomState = { scale: 1, offsetX: 0, offsetY: 0, dragging: false, lastX: 0, lastY: 0 };
+    draw();
+  });
+
+  window.addEventListener('resize', onResize);
+
+  document.getElementById('granularity').addEventListener('change', function(e){
+    cfg.granularity = e.target.value;
+    buildPeriodOptions();
+    render();
+  });
+  document.getElementById('dateStart').addEventListener('change', function(e){ cfg.dateStart = e.target.value; render(); });
+  document.getElementById('dateEnd').addEventListener('change', function(e){ cfg.dateEnd = e.target.value; render(); });
+  document.getElementById('topN').addEventListener('change', function(e){ cfg.topN = parseInt(e.target.value); render(); });
+  document.getElementById('flowAlpha').addEventListener('input', function(e){
+    cfg.flowAlpha = parseFloat(e.target.value);
+    document.getElementById('flowAlphaVal').textContent = cfg.flowAlpha.toFixed(2);
+    draw();
+  });
+  document.getElementById('curveSlider').addEventListener('input', function(e){
+    cfg.curve = parseFloat(e.target.value);
+    document.getElementById('curveVal').textContent = cfg.curve.toFixed(1);
+    draw();
+  });
+  document.getElementById('sortMode').addEventListener('change', function(e){ cfg.sortMode = e.target.value; render(); });
+  document.getElementById('colorMode').addEventListener('change', function(e){ cfg.colorMode = e.target.value; draw(); });
+
+  loadData();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else { init(); }
+</script>
+</body>
+</html>

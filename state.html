@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股市场温度计 · Market State</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#08080f; overflow:hidden; font-family:'SF Mono','Monaco','Menlo',monospace; }
+
+#hud {
+  position:fixed; top:0; left:0; width:100%; padding:10px 20px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; pointer-events:none; z-index:10;
+}
+#hud h1 { font-size:14px; font-weight:300; letter-spacing:3px; opacity:0.9; }
+#hud .sub { font-size:10px; opacity:0.4; margin-top:2px; letter-spacing:1px; }
+
+#grid {
+  position:fixed; top:50px; left:0; right:0; bottom:50px;
+  display:grid; gap:6px; padding:8px;
+  grid-template-columns: 320px 1fr 1fr;
+  grid-template-rows: auto 1fr 1fr;
+}
+
+/* ── 左列：温度计面板 ── */
+.thermo-col {
+  grid-row: span 3; display:flex; flex-direction:column; gap:6px;
+}
+.panel {
+  background:rgba(12,12,20,0.95); border:1px solid rgba(255,255,255,0.06);
+  border-radius:6px; position:relative; overflow:hidden;
+}
+.panel canvas { display:block; width:100%; height:100%; }
+.panel .p-title {
+  position:absolute; top:6px; left:10px; font-size:9px;
+  color:rgba(255,255,255,0.4); letter-spacing:1px; z-index:2; pointer-events:none;
+}
+
+/* ── 温度计仪表 ── */
+.gauge-panel {
+  padding:10px; display:flex; flex-direction:column; gap:8px;
+}
+.gauge {
+  display:flex; align-items:center; gap:8px;
+}
+.gauge-label {
+  font-size:9px; color:rgba(255,255,255,0.5); min-width:72px; text-align:right;
+}
+.gauge-bar {
+  flex:1; height:16px; background:rgba(255,255,255,0.05); border-radius:3px;
+  position:relative; overflow:hidden;
+}
+.gauge-fill {
+  height:100%; border-radius:3px; transition:width 0.3s;
+}
+.gauge-marker {
+  position:absolute; top:-2px; width:2px; height:20px; background:#fff;
+  box-shadow:0 0 4px #fff; transition:left 0.3s;
+}
+.gauge-val {
+  font-size:10px; font-weight:bold; min-width:60px; text-align:left;
+}
+
+/* ── regime状态显示 ── */
+.regime-panel { padding:10px; }
+.regime-grid {
+  display:grid; grid-template-columns: 1fr 1fr; gap:4px;
+}
+.regime-cell {
+  padding:4px 6px; border-radius:3px; font-size:9px;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.regime-dot {
+  width:8px; height:8px; border-radius:50%; margin-right:4px;
+}
+.regime-name { flex:1; margin-left:4px; color:rgba(255,255,255,0.7); }
+.regime-pct { color:rgba(255,255,255,0.5); }
+.regime-cell.active { background:rgba(100,180,255,0.15); }
+.regime-cell.active .regime-name { color:#6bf; }
+
+/* ── 右侧面板 ── */
+.chart-panel { position:relative; }
+.chart-panel canvas { display:block; width:100%; height:100%; }
+
+/* ── 底部统计卡 ── */
+.stats-panel {
+  grid-column: span 2; padding:8px 12px;
+  display:flex; gap:16px; flex-wrap:wrap; align-items:center;
+}
+.stat-item {
+  display:flex; flex-direction:column; gap:1px;
+}
+.stat-label { font-size:8px; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; }
+.stat-val { font-size:13px; font-weight:bold; }
+
+#controls {
+  position:fixed; bottom:0; left:0; width:100%; padding:8px 20px;
+  background:linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  color:#fff; z-index:10; display:flex; gap:14px; align-items:flex-end;
+}
+.ctrl-group { display:flex; flex-direction:column; gap:3px; }
+.ctrl-group label { font-size:9px; opacity:0.5; letter-spacing:1px; text-transform:uppercase; }
+.ctrl-group select, .ctrl-group button {
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+  color:#fff; padding:3px 8px; font-family:inherit; font-size:11px;
+  border-radius:4px; cursor:pointer;
+}
+.ctrl-group input[type="range"] {
+  -webkit-appearance:none; width:120px; height:4px; background:rgba(255,255,255,0.15);
+  border-radius:2px; outline:none; cursor:pointer;
+}
+.ctrl-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:10px; height:10px; border-radius:50%; background:#6bf; cursor:pointer;
+}
+.val-display { font-size:10px; opacity:0.7; }
+
+#tooltip {
+  position:fixed; display:none; background:rgba(0,0,0,0.92);
+  border:1px solid rgba(255,255,255,0.2); border-radius:6px;
+  padding:6px 10px; font-size:10px; color:#fff; pointer-events:none; z-index:20;
+}
+
+#navbar {
+  position:fixed; top:0; right:0; z-index:15; display:flex; gap:2px; padding:8px 16px;
+}
+.nav-item {
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.5); padding:5px 12px; font-size:10px;
+  font-family:'SF Mono',monospace; border-radius:4px; cursor:pointer;
+  transition:all 0.15s; text-decoration:none; letter-spacing:1px;
+}
+.nav-item:hover { background:rgba(255,255,255,0.12); color:#fff; }
+.nav-item.active { background:rgba(100,180,255,0.25); border-color:rgba(100,180,255,0.4); color:#6bf; }
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="index.html">3D波浪</a>
+  <a class="nav-item" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="calendar.html">日历热力</a>
+  <a class="nav-item" href="phase.html">相空间</a>
+    <a class="nav-item" href="marketstates.html">市场状态</a>
+      <a class="nav-item" href="marketscore.html">市场评分</a>
+        <a class="nav-item" href="liquidity.html">流动性</a>
+  <a class="nav-item active" href="state.html">温度计</a>
+</div>
+
+<div id="hud">
+  <h1>A股市场温度计 · MARKET STATE</h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="tooltip"></div>
+
+<div id="grid">
+  <!-- 左列：温度计+状态 -->
+  <div class="thermo-col">
+    <div class="panel gauge-panel">
+      <div style="font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:2px;margin-bottom:2px;">指标百分位 (当前值在历史中的位置)</div>
+      <div id="gauges"></div>
+    </div>
+    <div class="panel regime-panel">
+      <div style="font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:1px;margin-bottom:6px;">市场状态分布 (REGIME)</div>
+      <div class="regime-grid" id="regimeGrid"></div>
+    </div>
+    <div class="panel regime-panel" style="flex:1;">
+      <div style="font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:1px;margin-bottom:6px;">滚动一致性 (MA20 vs 60 vs 120 vs 全期)</div>
+      <canvas id="consistencyCanvas" style="width:100%;height:calc(100% - 20px);"></canvas>
+    </div>
+  </div>
+
+  <!-- 中间+右：图表 -->
+  <div class="panel chart-panel" id="p-zscore">
+    <div class="p-title">Z-Score 异常检测 (当前值偏离均值几个标准差)</div>
+    <canvas></canvas>
+  </div>
+  <div class="panel chart-panel" id="p-regime">
+    <div class="p-title">状态时间轴 REGIME TIMELINE</div>
+    <canvas></canvas>
+  </div>
+  <div class="panel chart-panel" id="p-dist" style="grid-column:span 2;">
+    <div class="p-title">收益率历史分布直方图 + 当前位置 (DISTRIBUTION)</div>
+    <canvas></canvas>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <label>滑动时间 SPECTATOR</label>
+    <input type="range" id="daySlider" min="20" max="100" step="1" value="100">
+    <span class="val-display" id="dayVal">最新</span>
+  </div>
+  <div class="ctrl-group">
+    <label>滚动窗口</label>
+    <input type="range" id="winSlider" min="5" max="60" step="5" value="20">
+    <span class="val-display" id="winVal">20日</span>
+  </div>
+  <div class="ctrl-group">
+    <label>视图</label>
+    <button id="btnCum">累积分布</button>
+  </div>
+</div>
+
+<script>
+var DATA = null;
+var cfg = { dayIdx: -1, win: 20, cumul: false };
+var dailyData = null;
+var percentiles = {};
+
+function loadData() {
+  fetch('data.json').then(function(r){ return r.json(); }).then(function(data){
+    DATA = data;
+    dailyData = DATA.daily;
+    computePercentiles();
+    document.getElementById('daySlider').max = dailyData.length - 1;
+    cfg.dayIdx = dailyData.length - 1;
+    document.getElementById('daySlider').value = cfg.dayIdx;
+    render();
+  });
+}
+
+function computePercentiles() {
+  var metrics = ['mean_ret','std_ret','total_amount','up_pct','skew'];
+  percentiles = {};
+  for (var mi = 0; mi < metrics.length; mi++) {
+    var m = metrics[mi];
+    var vals = [];
+    for (var i = 0; i < dailyData.length; i++) {
+      var v = getMetricVal(dailyData[i], m);
+      if (v != null && !isNaN(v)) vals.push(v);
+    }
+    vals.sort(function(a,b){ return a-b; });
+    percentiles[m] = vals;
+  }
+}
+
+function getMetricVal(d, m) {
+  if (m === 'skew') return (d.mean_ret||0) - (d.median_ret||0);
+  if (m === 'up_pct') return d.up_pct != null ? d.up_pct : (d.n_up||0)/(d.n_stocks||1);
+  return d[m];
+}
+
+function getPercentile(metric, val) {
+  var sorted = percentiles[metric];
+  if (!sorted || sorted.length === 0) return 50;
+  var lo = 0, hi = sorted.length;
+  while (lo < hi) {
+    var mid = (lo+hi) >> 1;
+    if (sorted[mid] < val) lo = mid+1; else hi = mid;
+  }
+  return lo / sorted.length * 100;
+}
+
+function getZScore(metric, val) {
+  var sorted = percentiles[metric];
+  if (!sorted || sorted.length < 2) return 0;
+  var n = sorted.length;
+  var mean = sorted.reduce(function(a,b){return a+b;},0) / n;
+  var variance = sorted.reduce(function(s,v){return s+(v-mean)*(v-mean);},0) / n;
+  var std = Math.sqrt(variance);
+  if (std === 0) return 0;
+  return (val - mean) / std;
+}
+
+var METRIC_META = {
+  mean_ret: { label:'日均收益率', fmt:function(v){return (v*100).toFixed(2)+'%';}, color:'#6bf' },
+  std_ret: { label:'截面波动率', fmt:function(v){return (v*100).toFixed(2)+'%';}, color:'#ff8800' },
+  total_amount: { label:'成交额', fmt:function(v){return (v/1e8).toFixed(0)+'亿';}, color:'#4363d8' },
+  up_pct: { label:'上涨占比', fmt:function(v){return (v*100).toFixed(1)+'%';}, color:'#3cb44b' },
+  skew: { label:'情绪偏度', fmt:function(v){return (v*100).toFixed(3)+'%';}, color:'#911eb4' }
+};
+
+// ═════════════════════════════════════════
+// 渲染
+// ═════════════════════════════════════════
+function render() {
+  var idx = cfg.dayIdx >= 0 ? cfg.dayIdx : dailyData.length - 1;
+  var d = dailyData[idx];
+
+  // HUD
+  document.getElementById('hud-sub').textContent =
+    d.date_str + ' · 滑动到任意交易日查看当时市场状态';
+
+  // 1. 温度计
+  renderGauges(idx);
+  // 2. Regime
+  renderRegime();
+  // 3. Z-Score时间序列
+  drawZScoreChart();
+  // 4. Regime timeline
+  drawRegimeTimeline();
+  // 5. 分布直方图
+  drawDistribution();
+  // 6. 一致性
+  drawConsistency();
+
+  // slider label
+  document.getElementById('dayVal').textContent = d.date_str;
+}
+
+function renderGauges(idx) {
+  var d = dailyData[idx];
+  var container = document.getElementById('gauges');
+  container.innerHTML = '';
+  var metrics = ['mean_ret','std_ret','total_amount','up_pct','skew'];
+
+  for (var i = 0; i < metrics.length; i++) {
+    var m = metrics[i];
+    var val = getMetricVal(d, m);
+    var pct = getPercentile(m, val);
+    var meta = METRIC_META[m];
+
+    var row = document.createElement('div');
+    row.className = 'gauge';
+
+    var lbl = document.createElement('div');
+    lbl.className = 'gauge-label';
+    lbl.textContent = meta.label;
+    row.appendChild(lbl);
+
+    var bar = document.createElement('div');
+    bar.className = 'gauge-bar';
+    // 渐变色背景
+    bar.style.background = 'linear-gradient(90deg, rgba(230,80,70,0.2), rgba(100,100,130,0.1), rgba(60,200,80,0.2))';
+
+    var marker = document.createElement('div');
+    marker.className = 'gauge-marker';
+    marker.style.left = Math.max(0, Math.min(100, pct)) + '%';
+    bar.appendChild(marker);
+
+    // P50线
+    var p50 = document.createElement('div');
+    p50.style.cssText = 'position:absolute;left:50%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.1);';
+    bar.appendChild(p50);
+
+    row.appendChild(bar);
+
+    var valEl = document.createElement('div');
+    valEl.className = 'gauge-val';
+    valEl.textContent = meta.fmt(val);
+    valEl.style.color = pct < 10 ? '#e6194B' : (pct > 90 ? '#3cb44b' : meta.color);
+    row.appendChild(valEl);
+
+    var pctEl = document.createElement('div');
+    pctEl.className = 'gauge-val';
+    pctEl.style.minWidth = '32px';
+    pctEl.style.fontSize = '9px';
+    pctEl.style.opacity = '0.5';
+    pctEl.textContent = 'P' + pct.toFixed(0);
+    row.appendChild(pctEl);
+
+    container.appendChild(row);
+  }
+}
+
+// ═════════════════════════════════════════
+// Regime分类
+// ═════════════════════════════════════════
+function classifyRegime(d, idx) {
+  var r = d.mean_ret || 0;
+  var s = d.std_ret || 0;
+  var up = getMetricVal(d, 'up_pct');
+  // 滚动波动率
+  var win = 20;
+  var startIdx = Math.max(0, idx - win);
+  var rets = [];
+  for (var i = startIdx; i <= idx; i++) rets.push(dailyData[i].mean_ret || 0);
+  var mean = rets.reduce(function(a,b){return a+b;},0) / rets.length;
+  var variance = rets.reduce(function(s2,v){return s2+(v-mean)*(v-mean);},0) / rets.length;
+  var vol = Math.sqrt(variance) * Math.sqrt(252);
+  var volMedian = 0.15; // approx
+
+  if (vol > 0.22 && r < -0.005) return { name:'恐慌', color:'#e6194B' };
+  if (vol > 0.22 && r > 0.005) return { name:'狂热', color:'#ff8800' };
+  if (vol < 0.12) return { name:'低波动', color:'#469990' };
+  if (s > 0.032) return { name:'分化', color:'#911eb4' };
+  if (r > 0.003 && up > 0.6) return { name:'强上行', color:'#3cb44b' };
+  if (r < -0.003 && up < 0.4) return { name:'弱下行', color:'#e6194B' };
+  return { name:'震荡', color:'#888899' };
+}
+
+function renderRegime() {
+  var idx = cfg.dayIdx >= 0 ? cfg.dayIdx : dailyData.length - 1;
+  var currentRegime = classifyRegime(dailyData[idx], idx).name;
+
+  // 统计全期
+  var counts = {};
+  for (var i = 0; i < dailyData.length; i++) {
+    var rg = classifyRegime(dailyData[i], i);
+    counts[rg.name] = (counts[rg.name] || 0) + 1;
+  }
+
+  var grid = document.getElementById('regimeGrid');
+  grid.innerHTML = '';
+  var order = ['强上行','弱下行','恐慌','狂热','低波动','分化','震荡'];
+  var colorMap = {
+    '强上行':'#3cb44b','弱下行':'#e6194B','恐慌':'#e6194B','狂热':'#ff8800',
+    '低波动':'#469990','分化':'#911eb4','震荡':'#888899'
+  };
+
+  for (var oi = 0; oi < order.length; oi++) {
+    var name = order[oi];
+    var cnt = counts[name] || 0;
+    var cell = document.createElement('div');
+    cell.className = 'regime-cell' + (name === currentRegime ? ' active' : '');
+
+    var dot = document.createElement('div');
+    dot.className = 'regime-dot';
+    dot.style.background = colorMap[name] || '#888';
+    cell.appendChild(dot);
+
+    var nm = document.createElement('div');
+    nm.className = 'regime-name';
+    nm.textContent = name;
+    cell.appendChild(nm);
+
+    var pctEl = document.createElement('div');
+    pctEl.className = 'regime-pct';
+    pctEl.textContent = (cnt / dailyData.length * 100).toFixed(1) + '%';
+    cell.appendChild(pctEl);
+
+    grid.appendChild(cell);
+  }
+}
+
+// ═════════════════════════════════════════
+// Z-Score Chart
+// ═════════════════════════════════════════
+function drawZScoreChart() {
+  var panel = document.getElementById('p-zscore');
+  var cv = panel.querySelector('canvas');
+  var rect = panel.getBoundingClientRect();
+  cv.width = rect.width * 2; cv.height = rect.height * 2;
+  var ctx = cv.getContext('2d'); ctx.scale(2,2);
+  var w = rect.width, h = rect.height;
+  ctx.clearRect(0,0,w,h);
+
+  var metrics = ['mean_ret','std_ret','up_pct','skew'];
+  var colors = { mean_ret:'#6bf', std_ret:'#ff8800', up_pct:'#3cb44b', skew:'#911eb4' };
+  var padL = 35, padR = 6, padT = 22, padB = 18;
+  var cw = w - padL - padR, ch = h - padT - padB;
+  var zMax = 4;
+
+  // ±2σ bands
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  ctx.fillRect(padL, padT + ch*(0.5 - 2/zMax/2), cw, ch * 2/zMax);
+  // zero line
+  var midY = padT + ch/2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(padL, midY); ctx.lineTo(w-padR, midY); ctx.stroke();
+  ctx.setLineDash([]);
+  // ±2σ lines
+  ctx.strokeStyle = 'rgba(230,80,70,0.15)';
+  ctx.beginPath();
+  ctx.moveTo(padL, padT + ch*(1-0.5-2/zMax/2));
+  ctx.lineTo(w-padR, padT + ch*(1-0.5-2/zMax/2));
+  ctx.moveTo(padL, padT + ch*(1-0.5+2/zMax/2));
+  ctx.lineTo(w-padR, padT + ch*(1-0.5+2/zMax/2));
+  ctx.stroke();
+
+  // y labels
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'right';
+  for (var z = -zMax; z <= zMax; z += 2) {
+    var y = padT + ch * (1 - (z+zMax)/(2*zMax));
+    ctx.fillText((z>0?'+':'')+z+'σ', padL-3, y+3);
+  }
+
+  // draw each metric as rolling z-score
+  var win = cfg.win;
+  for (var mi = 0; mi < metrics.length; mi++) {
+    var m = metrics[mi];
+    var zVals = [];
+    for (var i = 0; i < dailyData.length; i++) {
+      // rolling z-score: current value vs rolling mean/std
+      var startI = Math.max(0, i - 120); // use longer history for z-score
+      var chunk = [];
+      for (var j = startI; j <= i; j++) chunk.push(getMetricVal(dailyData[j], m));
+      var cm = chunk.reduce(function(a,b){return a+b;},0)/chunk.length;
+      var cv2 = chunk.reduce(function(s,v){return s+(v-cm)*(v-cm);},0)/chunk.length;
+      var cs = Math.sqrt(cv2);
+      var z = cs > 0 ? (getMetricVal(dailyData[i], m) - cm) / cs : 0;
+      zVals.push(Math.max(-zMax, Math.min(zMax, z)));
+    }
+
+    ctx.strokeStyle = colors[m];
+    ctx.lineWidth = 1.2;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    for (var k = 0; k < zVals.length; k++) {
+      var x = padL + k / Math.max(zVals.length-1,1) * cw;
+      var y2 = padT + ch * (1 - (zVals[k]+zMax)/(2*zMax));
+      if (k === 0) ctx.moveTo(x, y2); else ctx.lineTo(x, y2);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // current day marker
+  var idx = cfg.dayIdx >= 0 ? cfg.dayIdx : dailyData.length-1;
+  var mx = padL + idx / Math.max(dailyData.length-1,1) * cw;
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.beginPath(); ctx.moveTo(mx, padT); ctx.lineTo(mx, padT+ch); ctx.stroke();
+
+  // legend
+  ctx.font = '8px monospace'; ctx.textAlign = 'left';
+  var lx = padL + 4;
+  for (var li = 0; li < metrics.length; li++) {
+    ctx.fillStyle = colors[metrics[li]];
+    ctx.fillText(METRIC_META[metrics[li]].label, lx, padT+10);
+    lx += 60;
+  }
+
+  // date labels
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.textAlign = 'center';
+  var labelStep = Math.max(1, Math.floor(dailyData.length/6));
+  for (var dl = 0; dl < dailyData.length; dl += labelStep) {
+    ctx.fillText(dailyData[dl].date_str.slice(0,7), padL + dl/Math.max(dailyData.length-1,1)*cw, h-4);
+  }
+}
+
+// ═════════════════════════════════════════
+// Regime Timeline
+// ═════════════════════════════════════════
+function drawRegimeTimeline() {
+  var panel = document.getElementById('p-regime');
+  var cv = panel.querySelector('canvas');
+  var rect = panel.getBoundingClientRect();
+  cv.width = rect.width * 2; cv.height = rect.height * 2;
+  var ctx = cv.getContext('2d'); ctx.scale(2,2);
+  var w = rect.width, h = rect.height;
+  ctx.clearRect(0,0,w,h);
+
+  var padL = 6, padR = 6, padT = 22, padB = 18;
+  var cw = w - padL - padR, ch = h - padT - padB;
+  var barW = cw / dailyData.length;
+
+  var colorMap = {
+    '强上行':'#3cb44b','弱下行':'#cc4444','恐慌':'#e6194B','狂热':'#ff8800',
+    '低波动':'#469990','分化':'#911eb4','震荡':'#555566'
+  };
+
+  for (var i = 0; i < dailyData.length; i++) {
+    var rg = classifyRegime(dailyData[i], i);
+    ctx.fillStyle = colorMap[rg.name] || '#333';
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(padL + i*barW, padT, Math.max(barW-0.3, 0.5), ch);
+  }
+  ctx.globalAlpha = 1;
+
+  // current marker
+  var idx = cfg.dayIdx >= 0 ? cfg.dayIdx : dailyData.length-1;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  var mx = padL + idx*barW + barW/2;
+  ctx.moveTo(mx, padT-2); ctx.lineTo(mx, padT+ch+2); ctx.stroke();
+
+  // date labels
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'center';
+  var labelStep = Math.max(1, Math.floor(dailyData.length/6));
+  for (var dl = 0; dl < dailyData.length; dl += labelStep) {
+    ctx.fillText(dailyData[dl].date_str.slice(0,7), padL + dl*barW + barW/2, h-4);
+  }
+}
+
+// ═════════════════════════════════════════
+// Distribution histogram
+// ═════════════════════════════════════════
+function drawDistribution() {
+  var panel = document.getElementById('p-dist');
+  var cv = panel.querySelector('canvas');
+  var rect = panel.getBoundingClientRect();
+  cv.width = rect.width * 2; cv.height = rect.height * 2;
+  var ctx = cv.getContext('2d'); ctx.scale(2,2);
+  var w = rect.width, h = rect.height;
+  ctx.clearRect(0,0,w,h);
+
+  var idx = cfg.dayIdx >= 0 ? cfg.dayIdx : dailyData.length-1;
+
+  // 收集全期mean_ret
+  var vals = dailyData.map(function(d){ return d.mean_ret || 0; });
+  var vMin = -0.05, vMax = 0.05; // ±5%
+  var nBins = 60;
+  var binW = (vMax - vMin) / nBins;
+  var bins = new Array(nBins).fill(0);
+  for (var i = 0; i < vals.length; i++) {
+    var v = vals[i];
+    if (v < vMin) v = vMin;
+    if (v > vMax) v = vMax - 0.0001;
+    var bi = Math.floor((v - vMin) / binW);
+    bins[bi]++;
+  }
+  var maxBin = Math.max.apply(null, bins);
+
+  var padL = 40, padR = 10, padT = 22, padB = 22;
+  var cw = w - padL - padR, ch = h - padT - padB;
+  var barW = cw / nBins;
+
+  // bars
+  for (var b = 0; b < nBins; b++) {
+    var binCenter = vMin + (b+0.5) * binW;
+    var bh = bins[b] / maxBin * ch;
+    var x = padL + b * barW;
+    ctx.fillStyle = binCenter < 0 ? 'rgba(230,80,70,0.5)' : 'rgba(60,200,80,0.5)';
+    if (Math.abs(binCenter) < binW) ctx.fillStyle = 'rgba(100,100,130,0.3)';
+    ctx.fillRect(x, padT + ch - bh, Math.max(barW-1, 0.5), bh);
+  }
+
+  // normal distribution overlay
+  var mean = vals.reduce(function(a,b){return a+b;},0) / vals.length;
+  var variance = vals.reduce(function(s,v){return s+(v-mean)*(v-mean);},0) / vals.length;
+  var std = Math.sqrt(variance);
+  ctx.strokeStyle = 'rgba(255,215,0,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var xi = 0; xi <= 100; xi++) {
+    var xv = vMin + xi/100 * (vMax - vMin);
+    // normal pdf
+    var pdf = Math.exp(-0.5 * Math.pow((xv-mean)/std, 2)) / (std * Math.sqrt(2*Math.PI));
+    // scale to match histogram
+    var expectedCount = vals.length * binW / (std * Math.sqrt(2*Math.PI));
+    var yScale = expectedCount * pdf * (ch / maxBin);
+    var px = padL + (xv - vMin) / (vMax - vMin) * cw;
+    var py = padT + ch - Math.min(yScale, ch);
+    if (xi === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
+  // 当前日竖线
+  var curVal = dailyData[idx].mean_ret || 0;
+  var curX = padL + (Math.max(vMin, Math.min(vMax, curVal)) - vMin) / (vMax - vMin) * cw;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(curX, padT); ctx.lineTo(curX, padT+ch); ctx.stroke();
+  // label
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 10px monospace'; ctx.textAlign = curX > w/2 ? 'right' : 'left';
+  ctx.fillText(dailyData[idx].date_str + ' ' + (curVal*100).toFixed(2)+'%', curX + (curX > w/2 ? -4 : 4), padT+12);
+
+  // x-axis
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '8px monospace'; ctx.textAlign = 'center';
+  for (var xv2 = -5; xv2 <= 5; xv2++) {
+    var xpct = vMin + (xv2+5)/10 * (vMax - vMin);
+    var xx = padL + xpct / (vMax - vMin) * cw;
+    // hmm vMin is -0.05 so xv2 is in %, need to convert
+    xx = padL + (xv2/100 - vMin) / (vMax - vMin) * cw;
+    ctx.fillText(xv2 + '%', xx, padT+ch+12);
+  }
+
+  // stats
+  var skew = (dailyData[idx].mean_ret||0) - (dailyData[idx].median_ret||0);
+  var txt = 'μ='+(mean*100).toFixed(3)+'%  σ='+(std*100).toFixed(3)+'%  当前='+(curVal*100).toFixed(2)+'%  偏度='+(skew*100).toFixed(3)+'%';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '9px monospace'; ctx.textAlign = 'left';
+  ctx.fillText(txt, padL, padT+ch+12);
+}
+
+// ═════════════════════════════════════════
+// Consistency
+// ═════════════════════════════════════════
+function drawConsistency() {
+  var cv = document.getElementById('consistencyCanvas');
+  var rect = cv.getBoundingClientRect();
+  cv.width = rect.width * 2; cv.height = rect.height * 2;
+  var ctx = cv.getContext('2d'); ctx.scale(2,2);
+  var w = rect.width, h = rect.height;
+  ctx.clearRect(0,0,w,h);
+
+  var idx = cfg.dayIdx >= 0 ? cfg.dayIdx : dailyData.length-1;
+  var vals = dailyData.map(function(d){ return d.mean_ret||0; });
+
+  var periods = [20, 60, 120, 'all'];
+  var periodLabels = ['MA20','MA60','MA120','全期'];
+  var colors = ['#6bf','#ff8800','#911eb4','#888'];
+  var padL = 8, padR = 8, padT = 6, padB = 16;
+  var cw = w - padL - padR, ch = h - padT - padB;
+
+  var mas = [];
+  for (var pi = 0; pi < periods.length; pi++) {
+    var p = periods[pi];
+    var ma;
+    if (p === 'all') ma = vals.reduce(function(a,b){return a+b;},0) / vals.length;
+    else {
+      var startI = Math.max(0, idx - p + 1);
+      var chunk = vals.slice(startI, idx+1);
+      ma = chunk.reduce(function(a,b){return a+b;},0) / chunk.length;
+    }
+    mas.push(ma);
+  }
+
+  // bar chart
+  var maxAbs = Math.max.apply(null, mas.map(Math.abs));
+  if (maxAbs === 0) maxAbs = 0.001;
+  var midY = padT + ch/2;
+  var barW = cw / periods.length * 0.6;
+
+  // zero line
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.beginPath(); ctx.moveTo(padL, midY); ctx.lineTo(w-padR, midY); ctx.stroke();
+
+  for (var bi = 0; bi < periods.length; bi++) {
+    var x = padL + bi * cw/periods.length + (cw/periods.length - barW)/2;
+    var bh = Math.abs(mas[bi]) / maxAbs * ch * 0.4;
+    ctx.fillStyle = colors[bi];
+    if (mas[bi] >= 0) {
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(x, midY - bh, barW, bh);
+    } else {
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(x, midY, barW, bh);
+    }
+    ctx.globalAlpha = 1;
+    // label
+    ctx.fillStyle = colors[bi];
+    ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(periodLabels[bi], x + barW/2, h - 4);
+    // val
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '8px monospace';
+    ctx.fillText((mas[bi]*100).toFixed(3)+'%', x + barW/2, midY - bh - 4);
+  }
+}
+
+// ═════════════════════════════════════════
+// INIT
+// ═════════════════════════════════════════
+function init() {
+  document.getElementById('daySlider').addEventListener('input', function(e){
+    cfg.dayIdx = parseInt(e.target.value);
+    render();
+  });
+  document.getElementById('winSlider').addEventListener('input', function(e){
+    cfg.win = parseInt(e.target.value);
+    document.getElementById('winVal').textContent = cfg.win + '日';
+    render();
+  });
+  document.getElementById('btnCum').addEventListener('click', function(){
+    cfg.cumul = !cfg.cumul;
+    render();
+  });
+  window.addEventListener('resize', function(){ render(); });
+  loadData();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else { init(); }
+</script>
+</body>
+</html>

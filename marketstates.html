@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>A股市场状态识别 — Market States</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0a0a14; color:#cdd; font-family:'Segoe UI',system-ui,sans-serif;
+  overflow-x:hidden;
+}
+.nav { position:fixed; top:0; left:0; right:0; height:36px;
+  background:rgba(15,15,30,0.95); display:flex; align-items:center; padding:0 12px;
+  z-index:100; border-bottom:1px solid #333; gap:2px; overflow-x:auto; }
+.nav a { color:#778; text-decoration:none; font-size:11px; padding:4px 8px;
+  border-radius:4px; white-space:nowrap; transition:.2s; }
+.nav a:hover { color:#cef; background:rgba(255,255,255,0.08); }
+.nav a.active { color:#5cf; background:rgba(80,160,255,0.12); }
+.nav .sep { color:#445; margin:0 2px; }
+h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0;
+  letter-spacing:1px; }
+.subtitle { text-align:center; font-size:10px; color:#667; margin-bottom:4px; }
+
+.panel { background:rgba(20,20,40,0.6); border:1px solid #2a2a4a;
+  border-radius:8px; margin:6px; padding:8px; }
+.panel-title { font-size:12px; color:#8cf; margin-bottom:6px;
+  border-bottom:1px solid #334; padding-bottom:3px; }
+
+.layout { margin-top:42px; padding:4px; display:grid;
+  grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto;
+  gap:6px; max-width:1600px; }
+.layout > .panel:nth-child(1) { grid-column:1/3; }
+
+#zetaCanvas { display:block; width:100%; height:380px; cursor:crosshair; }
+#timelineCanvas { display:block; width:100%; height:120px; cursor:pointer; }
+#distCanvas { display:block; width:100%; height:200px; }
+#corrCanvas { display:block; width:100%; height:300px; cursor:crosshair; }
+#eigenCanvas { display:block; width:100%; height:200px; }
+
+.ctrl { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  margin:4px 0; font-size:11px; }
+.ctrl label { color:#889; }
+.ctrl select, .ctrl button {
+  background:#222; color:#ccd; border:1px solid #345; border-radius:4px;
+  padding:3px 8px; font-size:11px; cursor:pointer;
+}
+.ctrl button:hover { background:#335; }
+.state-chip { display:inline-block; padding:2px 8px; border-radius:10px;
+  font-size:10px; font-weight:bold; cursor:pointer; margin:1px; }
+
+.tooltip { position:fixed; pointer-events:none; background:rgba(10,10,20,0.95);
+  border:1px solid #558; border-radius:4px; padding:4px 8px; font-size:11px;
+  color:#cef; z-index:200; display:none; white-space:nowrap; }
+
+.legend-bar { display:flex; height:10px; border-radius:3px; overflow:hidden;
+  margin:4px 0; }
+.legend-bar div { flex:1; }
+.legend-labels { display:flex; justify-content:space-between; font-size:9px; color:#667; }
+
+.info-text { font-size:10px; color:#778; line-height:1.5; }
+.method-box { background:rgba(10,30,50,0.4); border-left:3px solid #47a;
+  padding:6px 10px; margin:6px 0; font-size:10px; color:#8ac; line-height:1.5; }
+.method-box b { color:#ace; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="index.html">3D波浪</a>
+  <a href="streamgraph.html">资金流向</a>
+  <a href="sankey.html">桑基迁移</a>
+  <a href="dashboard.html">仪表盘</a>
+  <a href="calendar.html">日历热力</a>
+  <a href="state.html">温度计</a>
+  <a href="phase.html">相空间</a>
+  <span class="sep">|</span>
+  <a href="marketstates.html" class="active">市场状态</a>
+    <a href="marketscore.html">市场评分</a>
+      <a href="liquidity.html">流动性</a>
+</div>
+
+<div class="layout">
+
+<!-- ζ相似度矩阵 -->
+<div class="panel">
+  <div class="panel-title">ζ 相似度矩阵 — 市场状态的"距离地图"
+    <span style="font-size:9px;color:#567;font-weight:normal;">（浅=相似，深=不同；深色条纹=危机/剧变）</span>
+  </div>
+  <canvas id="zetaCanvas"></canvas>
+  <div class="ctrl">
+    <label>显示:</label>
+    <select id="zetaMode">
+      <option value="zeta">ζ 相似度</option>
+      <option value="states">状态分配</option>
+    </select>
+    <span style="margin-left:8px;color:#889;font-size:10px" id="zetaHover">悬停查看详情</span>
+  </div>
+</div>
+
+<!-- 状态时间线 -->
+<div class="panel">
+  <div class="panel-title">市场状态时间线 — 11年状态演化
+    <span style="font-size:9px;color:#567;font-weight:normal;">（点击切换选中状态）</span>
+  </div>
+  <canvas id="timelineCanvas"></canvas>
+  <div id="stateChips" style="margin:4px 0"></div>
+</div>
+
+<!-- 相关分布演化 -->
+<div class="panel">
+  <div class="panel-title">相关系数分布演化 — 危机的"指纹"
+    <span style="font-size:9px;color:#567;font-weight:normal;">（双峰=行业脱钩前兆；窄峰高相关=危机态）</span>
+  </div>
+  <canvas id="distCanvas"></canvas>
+  <div class="legend-labels">
+    <span>低相关</span><span>→</span><span>高相关</span>
+  </div>
+</div>
+
+<!-- 行业相关矩阵 -->
+<div class="panel">
+  <div class="panel-title">行业相关结构 — 各状态的特征"指纹"
+    <span style="font-size:9px;color:#567;font-weight:normal;">（对角块=行业内相关；点击矩阵切换状态）</span>
+  </div>
+  <canvas id="corrCanvas"></canvas>
+  <div class="ctrl">
+    <label>状态:</label>
+    <select id="corrState"></select>
+    <label style="margin-left:8px;">视图:</label>
+    <select id="corrView">
+      <option value="absolute">绝对相关</option>
+      <option value="diff">与均值之差</option>
+    </select>
+  </div>
+</div>
+
+</div>
+
+<div class="panel" style="margin:8px;max-width:1600px">
+  <div class="panel-title">方法论 — 基于 Münnix et al. (2012) Scientific Reports</div>
+  <div class="method-box">
+    <b>核心思想：</b>市场是复杂非平稳系统。用滚动相关矩阵 C(t) 定义市场"状态"，
+    用 ζ(t₁,t₂) = ⟨|C(t₁) - C(t₂)|⟩ 衡量两个时刻的相似度。
+    局部归一化（n=13天）去除漂移和波动率突变，使相关结构可比。
+    <b>聚类</b>将70个非重叠2月窗口分为8个典型状态。深色条纹=相关结构剧变=危机。
+    <b>双峰分布</b>意味着某些行业从市场"脱钩"，是危机前兆。
+  </div>
+</div>
+
+<div class="tooltip" id="tip"></div>
+
+<script>
+var DATA = null;
+var selectedState = 0;  // 0 = all
+var STATE_COLORS = [
+  '#4fc3f7','#81c784','#ffb74d','#e57373','#ba68c8',
+  '#4db6ac','#ffd54f','#7986cb','#f06292','#aed581'
+];
+
+// ── 加载数据 ──
+fetch('market_states.json?_=' + Date.now())
+.then(r => r.json())
+.then(d => {
+  DATA = d;
+  init();
+})
+.catch(e => {
+  document.body.innerHTML += '<div style="color:#f88;padding:20px">加载失败: ' + e + '</div>';
+});
+
+function init() {
+  buildStateSelector();
+  buildStateChips();
+  drawZeta();
+  drawTimeline();
+  drawDistEvolution();
+  drawCorrMatrix();
+  bindControls();
+  window.addEventListener('resize', function() {
+    drawZeta(); drawTimeline(); drawDistEvolution(); drawCorrMatrix();
+  });
+}
+
+// ── 状态选择器 ──
+function buildStateSelector() {
+  var sel = document.getElementById('corrState');
+  var opt = document.createElement('option');
+  opt.value = 0; opt.textContent = '全部状态(均值)';
+  sel.appendChild(opt);
+  for (var s = 1; s <= DATA.meta.n_states; s++) {
+    var info = DATA.states[String(s)];
+    opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = 'State ' + s + ' (' + info.n_windows + '窗口, ' + info.first_date.slice(0,4) + '~' + info.last_date.slice(0,4) + ')';
+    sel.appendChild(opt);
+  }
+}
+
+function buildStateChips() {
+  var div = document.getElementById('stateChips');
+  div.innerHTML = '';
+  var allChip = document.createElement('span');
+  allChip.className = 'state-chip';
+  allChip.style.background = selectedState === 0 ? '#345' : '#222';
+  allChip.style.color = '#ccd';
+  allChip.textContent = '全部';
+  allChip.onclick = function() { selectedState = 0; buildStateChips(); drawZeta(); drawCorrMatrix(); };
+  div.appendChild(allChip);
+  for (var s = 1; s <= DATA.meta.n_states; s++) {
+    (function(s) {
+      var info = DATA.states[String(s)];
+      var chip = document.createElement('span');
+      chip.className = 'state-chip';
+      chip.style.background = selectedState === s ? STATE_COLORS[s-1] : '#222';
+      chip.style.color = selectedState === s ? '#000' : STATE_COLORS[s-1];
+      chip.style.border = '1px solid ' + STATE_COLORS[s-1];
+      chip.textContent = 'S' + s + ' (' + info.n_windows + ')';
+      chip.onclick = function() {
+        selectedState = (selectedState === s) ? 0 : s;
+        buildStateChips(); drawZeta(); drawCorrMatrix();
+        document.getElementById('corrState').value = selectedState;
+      };
+      div.appendChild(chip);
+    })(s);
+  }
+}
+
+// ── 日期格式化 ──
+function fmtDate(d) {
+  return d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+}
+function fmtDateShort(d) {
+  return d.substring(0,4) + d.substring(4,6);
+}
+
+// ═══════════════════════════════════════
+// ζ相似度矩阵
+// ═══════════════════════════════════════
+function drawZeta() {
+  var canvas = document.getElementById('zetaCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(0, 0, W, H);
+
+  var n = DATA.window_dates.length;
+  var zeta = DATA.zeta_matrix;
+  var labels = DATA.state_labels;
+  var mode = document.getElementById('zetaMode').value;
+
+  // 找最大ζ用于归一化
+  var maxZ = 0;
+  for (var i = 0; i < n; i++)
+    for (var j = 0; j < n; j++)
+      if (zeta[i][j] > maxZ) maxZ = zeta[i][j];
+
+  var padL = 60, padR = 10, padT = 10, padB = 40;
+  var plotW = W - padL - padR;
+  var plotH = H - padT - padB;
+  var cellW = plotW / n;
+  var cellH = plotH / n;
+
+  // 绘制矩阵
+  for (var i = 0; i < n; i++) {
+    for (var j = 0; j < n; j++) {
+      var x = padL + j * cellW;
+      var y = padT + i * cellH;
+      if (mode === 'zeta') {
+        var v = zeta[i][j] / maxZ;  // 0=similar(亮), 1=dissimilar(暗)
+        // 亮色=低ζ=相似; 暗蓝=高ζ=不同
+        var r = Math.round(v * 20);
+        var g = Math.round((1 - v) * 80 + 20);
+        var b = Math.round((1 - v) * 160 + 40);
+        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+      } else {
+        // 状态模式: 同状态=状态颜色, 不同=暗
+        if (labels[i] === labels[j]) {
+          ctx.fillStyle = STATE_COLORS[labels[i] - 1];
+          ctx.globalAlpha = 0.7;
+        } else {
+          ctx.fillStyle = '#1a1a2a';
+          ctx.globalAlpha = 1;
+        }
+      }
+      ctx.fillRect(x, y, Math.ceil(cellW) + 1, Math.ceil(cellH) + 1);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 轴标签 (年份)
+  ctx.fillStyle = '#778';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  for (var i = 0; i < n; i += 4) {
+    var d = DATA.window_dates[i];
+    var label = d.substring(0, 4) + '.' + d.substring(4, 6);
+    ctx.fillText(label, padL + i * cellW + cellW / 2, H - padB + 14);
+    ctx.save();
+    ctx.translate(padL - 6, padT + i * cellH + cellH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  }
+
+  // 对角线标记
+  ctx.strokeStyle = 'rgba(255,200,100,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, padT);
+  ctx.lineTo(padL + plotW, padT + plotH);
+  ctx.stroke();
+
+  // 选中状态高亮
+  if (selectedState > 0) {
+    ctx.strokeStyle = STATE_COLORS[selectedState - 1];
+    ctx.lineWidth = 2;
+    for (var i = 0; i < n; i++) {
+      if (labels[i] === selectedState) {
+        ctx.strokeRect(padL + i * cellW - 1, padT + i * cellH - 1,
+          cellW + 2, cellH + 2);
+        // 高亮整行整列
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = STATE_COLORS[selectedState - 1];
+        ctx.fillRect(padL + i * cellW, padT, cellW, plotH);
+        ctx.fillRect(padL, padT + i * cellH, plotW, cellH);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // 标题
+  ctx.fillStyle = '#9cf';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  var titleTxt = mode === 'zeta'
+    ? 'ζ(t₁,t₂) — 深色=危机剧变  range: 0~' + maxZ.toFixed(3)
+    : '状态分配 — 同色=同状态';
+  ctx.fillText(titleTxt, padL, padT - 2);
+}
+
+// ═══════════════════════════════════════
+// 状态时间线
+// ═══════════════════════════════════════
+function drawTimeline() {
+  var canvas = document.getElementById('timelineCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(0, 0, W, H);
+
+  var tl = DATA.monthly_timeline;
+  var n = tl.length;
+  var padL = 10, padR = 10, padT = 8, padB = 24;
+  var plotW = W - padL - padR;
+  var plotH = H - padT - padB;
+  var barW = plotW / n;
+
+  // 窗口状态
+  var wDates = DATA.window_dates;
+  var wLabels = DATA.state_labels;
+  var nW = wDates.length;
+  var winBarW = plotW / nW;
+
+  // 先画非重叠窗口的背景色块
+  for (var i = 0; i < nW; i++) {
+    var s = wLabels[i];
+    ctx.fillStyle = STATE_COLORS[s - 1];
+    ctx.globalAlpha = 0.25;
+    ctx.fillRect(padL + i * winBarW, padT, winBarW + 1, plotH);
+    ctx.globalAlpha = 1;
+  }
+
+  // 月度时间线 (折线+点)
+  for (var i = 0; i < n; i++) {
+    var s = tl[i].state;
+    var x = padL + (i / (n - 1)) * plotW;
+    var y = padT + plotH - ((s - 1) / (DATA.meta.n_states - 1)) * plotH;
+    var color = STATE_COLORS[s - 1];
+
+    if (i > 0) {
+      var prevS = tl[i - 1].state;
+      var prevX = padL + ((i - 1) / (n - 1)) * plotW;
+      var prevY = padT + plotH - ((prevS - 1) / (DATA.meta.n_states - 1)) * plotH;
+      // 状态切换=虚线
+      if (prevS !== s) {
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      } else {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.5;
+      }
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(prevX, prevY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+    }
+
+    // 点
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, selectedState === s ? 5 : 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (selectedState === s) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Y轴标签
+  ctx.fillStyle = '#778';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'right';
+  for (var s = 1; s <= DATA.meta.n_states; s++) {
+    var y = padT + plotH - ((s - 1) / (DATA.meta.n_states - 1)) * plotH;
+    ctx.fillStyle = STATE_COLORS[s - 1];
+    ctx.fillText('S' + s, padL + plotW + 6, y + 3);
+  }
+
+  // X轴年份
+  ctx.fillStyle = '#778';
+  ctx.textAlign = 'center';
+  for (var i = 0; i < n; i += 12) {
+    var d = tl[i].date;
+    var x = padL + (i / (n - 1)) * plotW;
+    ctx.fillText(d.substring(0, 4), x, H - padB + 14);
+  }
+}
+
+// ═══════════════════════════════════════
+// 相关分布演化
+// ═══════════════════════════════════════
+function drawDistEvolution() {
+  var canvas = document.getElementById('distCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(0, 0, W, H);
+
+  var hists = DATA.corr_hists;
+  var n = hists.length;
+  var padL = 40, padR = 10, padT = 8, padB = 24;
+  var plotW = W - padL - padR;
+  var plotH = H - padT - padB;
+
+  // 每个时间点画一条垂直的直方图
+  var nBins = hists[0].counts.length;
+  var colW = plotW / n;
+
+  for (var i = 0; i < n; i++) {
+    var counts = hists[i].counts;
+    var maxC = Math.max.apply(null, counts);
+    if (maxC === 0) continue;
+    var x0 = padL + i * colW;
+
+    for (var b = 0; b < nBins; b++) {
+      var frac = counts[b] / maxC;
+      var y = padT + plotH - (b / (nBins - 1)) * plotH;
+      var h = (plotH / nBins) * 0.9;
+      // 颜色: 低相关=蓝, 高相关=红
+      var corrVal = -1 + (b / (nBins - 1)) * 2;  // -1 to 1
+      var r, g, bb;
+      if (corrVal < 0) {
+        r = 20; g = Math.round(80 + corrVal * -80); bb = 200;
+      } else {
+        r = 200; g = Math.round(80 - corrVal * 60); bb = 40;
+      }
+      ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + bb + ',' + (0.3 + frac * 0.7) + ')';
+      ctx.fillRect(x0, y - h / 2, colW + 0.5, h);
+    }
+  }
+
+  // 均值线
+  ctx.strokeStyle = 'rgba(255,255,100,0.8)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var mean = hists[i].mean;  // -1 to 1
+    var x = padL + i * colW + colW / 2;
+    var y = padT + plotH - ((mean + 1) / 2) * plotH;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Y轴
+  ctx.fillStyle = '#778';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'right';
+  for (var v = -1; v <= 1; v += 0.5) {
+    var y = padT + plotH - ((v + 1) / 2) * plotH;
+    ctx.fillText(v.toFixed(1), padL - 4, y + 3);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+  }
+
+  // X轴
+  ctx.textAlign = 'center';
+  for (var i = 0; i < n; i += 8) {
+    var d = hists[i].date;
+    var x = padL + i * colW + colW / 2;
+    ctx.fillText(d.substring(0, 4), x, H - padB + 14);
+  }
+
+  // 图例
+  ctx.fillStyle = 'rgba(255,255,100,0.8)';
+  ctx.fillRect(padL + plotW - 80, padT, 12, 2);
+  ctx.fillStyle = '#998';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('平均相关', padL + plotW - 64, padT + 5);
+}
+
+// ═══════════════════════════════════════
+// 行业相关矩阵
+// ═══════════════════════════════════════
+function drawCorrMatrix() {
+  var canvas = document.getElementById('corrCanvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var W = rect.width, H = rect.height;
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(0, 0, W, H);
+
+  var n = DATA.meta.n_industries;
+  var padL = 10, padR = 10, padT = 10, padB = 60;
+  var size = Math.min(W - padL - padR, H - padT - padB);
+  var cellSize = size / n;
+  var offsetX = padL + (W - padL - padR - size) / 2;
+
+  // 选择矩阵
+  var stateVal = parseInt(document.getElementById('corrState').value);
+  var viewMode = document.getElementById('corrView').value;
+  var corr;
+  if (stateVal === 0) {
+    corr = DATA.full_avg_corr;
+  } else {
+    corr = DATA.states[String(stateVal)].avg_corr;
+  }
+  var refAvg = DATA.full_avg_corr;
+
+  var indOrder = DATA.ind_order;
+
+  // 绘制矩阵
+  for (var i = 0; i < n; i++) {
+    for (var j = 0; j < n; j++) {
+      var ii = indOrder[i];
+      var jj = indOrder[j];
+      var v = corr[ii][jj];
+      if (viewMode === 'diff' && stateVal > 0) {
+        v = v - refAvg[ii][jj];
+        // 差异模式: 正=红, 负=蓝
+        var intensity = Math.min(1, Math.abs(v) / 0.3);
+        if (v > 0) {
+          ctx.fillStyle = 'rgba(220,80,40,' + intensity + ')';
+        } else {
+          ctx.fillStyle = 'rgba(40,120,220,' + intensity + ')';
+        }
+      } else {
+        // 绝对模式: -1=蓝, 0=黑, +1=红
+        if (v > 0) {
+          ctx.fillStyle = 'rgba(200,' + Math.round(80 - v * 60) + ',40,' + Math.min(1, v + 0.2) + ')';
+        } else {
+          ctx.fillStyle = 'rgba(40,120,200,' + Math.min(1, -v + 0.2) + ')';
+        }
+      }
+      var x = offsetX + j * cellSize;
+      var y = padT + i * cellSize;
+      ctx.fillRect(x, y, Math.ceil(cellSize) + 1, Math.ceil(cellSize) + 1);
+    }
+  }
+
+  // 对角线
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(offsetX, padT);
+  ctx.lineTo(offsetX + size, padT + size);
+  ctx.stroke();
+
+  // 选中状态颜色标记
+  if (stateVal > 0) {
+    ctx.strokeStyle = STATE_COLORS[stateVal - 1];
+    ctx.lineWidth = 3;
+    ctx.strokeRect(offsetX - 2, padT - 2, size + 4, size + 4);
+  }
+
+  // 标题
+  ctx.fillStyle = '#9cf';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  var titleTxt = stateVal === 0
+    ? '全期平均相关结构'
+    : 'State ' + stateVal + ' (' + DATA.states[String(stateVal)].n_windows + '窗口)';
+  if (viewMode === 'diff' && stateVal > 0) titleTxt += ' [与均值之差]';
+  ctx.fillText(titleTxt, offsetX, padT - 4);
+
+  // X轴行业标签 (每5个)
+  ctx.fillStyle = '#668';
+  ctx.font = '8px sans-serif';
+  ctx.textAlign = 'right';
+  for (var i = 0; i < n; i += 5) {
+    var indName = DATA.industries[indOrder[i]];
+    if (indName && indName.length > 6) indName = indName.substring(0, 6);
+    var x = offsetX + i * cellSize;
+    ctx.save();
+    ctx.translate(x, padT + size + 4);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(indName, 0, 0);
+    ctx.restore();
+  }
+}
+
+// ── 控件绑定 ──
+function bindControls() {
+  document.getElementById('zetaMode').addEventListener('change', drawZeta);
+  document.getElementById('corrState').addEventListener('change', drawCorrMatrix);
+  document.getElementById('corrView').addEventListener('change', drawCorrMatrix);
+
+  // ζ矩阵悬停
+  var zCanvas = document.getElementById('zetaCanvas');
+  var tip = document.getElementById('tip');
+  zCanvas.addEventListener('mousemove', function(e) {
+    if (!DATA) return;
+    var rect = zCanvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    var n = DATA.window_dates.length;
+    var padL = 60, padR = 10, padT = 10, padB = 40;
+    var plotW = rect.width - padL - padR;
+    var plotH = rect.height - padT - padB;
+    var cellW = plotW / n;
+    var cellH = plotH / n;
+    var j = Math.floor((mx - padL) / cellW);
+    var i = Math.floor((my - padT) / cellH);
+    if (i >= 0 && i < n && j >= 0 && j < n) {
+      var z = DATA.zeta_matrix[i][j];
+      var si = DATA.state_labels[i], sj = DATA.state_labels[j];
+      var di = DATA.window_dates[i], dj = DATA.window_dates[j];
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY + 12) + 'px';
+      tip.innerHTML = fmtDateShort(di) + ' × ' + fmtDateShort(dj)
+        + '<br>ζ = ' + z.toFixed(4)
+        + '<br>S' + si + ' × S' + sj
+        + (si === sj ? ' (同状态)' : '');
+    } else {
+      tip.style.display = 'none';
+    }
+  });
+  zCanvas.addEventListener('mouseleave', function() { tip.style.display = 'none'; });
+
+  // 时间线点击
+  var tlCanvas = document.getElementById('timelineCanvas');
+  tlCanvas.addEventListener('click', function(e) {
+    if (!DATA) return;
+    var rect = tlCanvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var n = DATA.monthly_timeline.length;
+    var padL = 10, padR = 10;
+    var plotW = rect.width - padL - padR;
+    var idx = Math.round((mx - padL) / plotW * (n - 1));
+    if (idx >= 0 && idx < n) {
+      var s = DATA.monthly_timeline[idx].state;
+      selectedState = (selectedState === s) ? 0 : s;
+      buildStateChips();
+      drawZeta();
+      drawCorrMatrix();
+      document.getElementById('corrState').value = selectedState;
+    }
+  });
+
+  // 相关矩阵悬停
+  var corrCanvas = document.getElementById('corrCanvas');
+  corrCanvas.addEventListener('mousemove', function(e) {
+    if (!DATA) return;
+    var rect = corrCanvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    var n = DATA.meta.n_industries;
+    var padL = 10, padR = 10, padT = 10, padB = 60;
+    var size = Math.min(rect.width - padL - padR, rect.height - padT - padB);
+    var cellSize = size / n;
+    var offsetX = padL + (rect.width - padL - padR - size) / 2;
+    var j = Math.floor((mx - offsetX) / cellSize);
+    var i = Math.floor((my - padT) / cellSize);
+    if (i >= 0 && i < n && j >= 0 && j < n) {
+      var ii = DATA.ind_order[i], jj = DATA.ind_order[j];
+      var stateVal = parseInt(document.getElementById('corrState').value);
+      var corr = stateVal === 0 ? DATA.full_avg_corr : DATA.states[String(stateVal)].avg_corr;
+      var v = corr[ii][jj];
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY + 12) + 'px';
+      tip.innerHTML = DATA.industries[ii] + ' × ' + DATA.industries[jj]
+        + '<br>ρ = ' + v.toFixed(3);
+    } else {
+      tip.style.display = 'none';
+    }
+  });
+  corrCanvas.addEventListener('mouseleave', function() { tip.style.display = 'none'; });
+}
+</script>
+</body>
+</html>

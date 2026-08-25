@@ -1,0 +1,13 @@
+# 数据与缓存（由 bootstrap.py 生成 / 每日 update_all.py 增量更新）
+*.parquet
+data.json
+liquidity.json
+market_score.json
+market_states.json
+cache_liquidity/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+nohup.out
+*.log

@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
+<title>A股资金流向 · Flow Analysis</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0a0a12;overflow:hidden;font-family:'SF Mono','Monaco','Menlo',monospace;}
+
+#navbar{position:fixed;top:0;right:0;z-index:15;display:flex;gap:2px;padding:8px 16px;}
+.nav-item{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);padding:5px 12px;font-size:10px;font-family:'SF Mono',monospace;border-radius:4px;cursor:pointer;transition:all 0.15s;text-decoration:none;letter-spacing:1px;}
+.nav-item:hover{background:rgba(255,255,255,0.12);color:#fff;}
+.nav-item.active{background:rgba(100,180,255,0.25);border-color:rgba(100,180,255,0.4);color:#6bf;}
+
+#hud{position:fixed;top:0;left:0;width:100%;padding:10px 20px;background:linear-gradient(180deg,rgba(0,0,0,0.85) 0%,transparent 100%);color:#fff;pointer-events:none;z-index:10;}
+#hud h1{font-size:14px;font-weight:300;letter-spacing:3px;opacity:0.9;}
+#hud .sub{font-size:10px;opacity:0.4;margin-top:2px;letter-spacing:1px;}
+
+#controls{position:fixed;bottom:0;left:0;width:100%;padding:10px 20px;background:linear-gradient(0deg,rgba(0,0,0,0.9) 0%,transparent 100%);color:#fff;z-index:10;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;}
+.ctrl-group{display:flex;flex-direction:column;gap:3px;}
+.ctrl-group label{font-size:9px;opacity:0.5;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;}
+.ctrl-group select,.ctrl-group button{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:4px 8px;font-family:inherit;font-size:11px;border-radius:4px;cursor:pointer;}
+.ctrl-group select:hover,.ctrl-group button:hover{background:rgba(255,255,255,0.15);}
+.ctrl-group input[type="date"]{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:4px 8px;font-family:inherit;font-size:11px;border-radius:4px;color-scheme:dark;}
+.ctrl-group input[type="range"]{-webkit-appearance:none;width:100px;height:4px;background:rgba(255,255,255,0.15);border-radius:2px;outline:none;cursor:pointer;}
+.ctrl-group input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#6bf;cursor:pointer;}
+.val-display{font-size:10px;opacity:0.7;min-width:30px;text-align:center;}
+.ctrl-group .hint-text{font-size:9px;opacity:0.4;line-height:1.4;}
+
+#tooltip{position:fixed;display:none;background:rgba(0,0,0,0.94);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:8px 12px;font-size:11px;color:#fff;pointer-events:none;z-index:20;min-width:180px;}
+#tooltip .tt-title{font-size:12px;font-weight:bold;margin-bottom:4px;}
+#tooltip .tt-row{display:flex;justify-content:space-between;gap:12px;opacity:0.85;line-height:1.5;}
+#tooltip .tt-val{color:#6bf;font-weight:bold;}
+#tooltip .tt-bar{height:3px;border-radius:2px;margin-top:3px;}
+#tooltip .tt-section{margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.1);}
+
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:13px;letter-spacing:3px;opacity:0.6;z-index:5;}
+
+canvas{display:block;cursor:crosshair;}
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <a class="nav-item" href="index.html">3D波浪</a>
+  <a class="nav-item" href="phase.html">相空间</a>
+  <a class="nav-item" href="marketstates.html">市场状态</a>
+  <a class="nav-item" href="marketscore.html">市场评分</a>
+  <a class="nav-item" href="liquidity.html">流动性</a>
+  <a class="nav-item active" href="streamgraph.html">资金流向</a>
+  <a class="nav-item" href="sankey.html">桑基迁移</a>
+  <a class="nav-item" href="dashboard.html">仪表盘</a>
+  <a class="nav-item" href="state.html">温度计</a>
+  <a class="nav-item" href="calendar.html">日历热力</a>
+</div>
+
+<div id="hud">
+  <h1>A股资金流向 · Flow Analysis</h1>
+  <div class="sub" id="hud-sub">LOADING...</div>
+</div>
+
+<div id="loading">LOADING DATA...</div>
+<div id="tooltip"></div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <label>对比窗口 WINDOW</label>
+    <select id="windowSize">
+      <option value="5">5日(周)</option>
+      <option value="20" selected>20日(月)</option>
+      <option value="60">60日(季)</option>
+      <option value="120">120日(半年)</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>颗粒度</label>
+    <select id="granularity">
+      <option value="1">每日</option>
+      <option value="5">每周</option>
+      <option value="20" selected>每月</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>起始</label>
+    <input type="date" id="dateStart">
+  </div>
+  <div class="ctrl-group">
+    <label>结束</label>
+    <input type="date" id="dateEnd">
+  </div>
+  <div class="ctrl-group">
+    <label>曲度 <span class="val-display" id="smoothVal">0.4</span></label>
+    <input type="range" id="smoothSlider" min="0" max="0.8" step="0.1" value="0.4">
+  </div>
+  <div class="ctrl-group">
+    <label>TOP N</label>
+    <select id="topN">
+      <option value="15" selected>前15</option>
+      <option value="26">全部</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>快捷时段</label>
+    <select id="quickRange">
+      <option value="">— 选时段 —</option>
+      <option value="2025-01-01,2026-12-31">2025-26</option>
+      <option value="2023-01-01,2026-12-31">2023-26</option>
+      <option value="2020-01-01,2022-12-31">2020-22</option>
+      <option value="2018-01-01,2020-12-31">2018-20</option>
+      <option value="2015-01-01,2017-12-31">2015-17</option>
+      <option value="all">全部</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>操作</label>
+    <span class="hint-text">滚轮缩放·拖拽平移<br>双击重置·hover查看</span>
+  </div>
+</div>
+
+<script>
+var DATA=null,canvas,ctx,W,H;
+var cfg={windowSize:20,granularity:20,dateStart:null,dateEnd:null,smooth:0.4,topN:15};
+var hoverInfo=null;
+var renderData=null;
+var zoomState={scale:1,offsetX:0,offsetY:0,dragging:false,lastX:0,lastY:0};
+
+var PALETTE=[
+  '#e6194B','#3cb44b','#ffe119','#4363d8','#f58231','#911eb4','#42d4f4','#f032e6',
+  '#469990','#9A6324','#800000','#808000','#000075','#a9a9a9','#aaffc3','#80b1d3',
+  '#fdb462','#b3de69','#fccde5','#d9d9d9','#bc80bd','#ffd8b1','#fabed4','#dcbeff',
+  '#bfef45','#fb8072'
+];
+
+// ═══ 布局常量 ═══
+var LAYOUT={
+  padTop:42,
+  padBottom:80,
+  gap:8
+};
+
+// ═══ 数据加载 ═══
+function loadData(){
+  fetch('data.json')
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(data){
+      DATA=data;
+      var first=DATA.daily[0].date_str;
+      var last=DATA.daily[DATA.daily.length-1].date_str;
+      cfg.dateStart=first;cfg.dateEnd=last;
+      document.getElementById('dateStart').value=first;
+      document.getElementById('dateStart').min=first;
+      document.getElementById('dateStart').max=last;
+      document.getElementById('dateEnd').value=last;
+      document.getElementById('dateEnd').min=first;
+      document.getElementById('dateEnd').max=last;
+      document.getElementById('loading').style.display='none';
+      render();
+    })
+    .catch(function(err){
+      document.getElementById('loading').textContent='Error: '+err.message;
+    });
+}
+
+function getFilteredIndustry(){
+  var ds=cfg.dateStart,de=cfg.dateEnd,out=[];
+  for(var i=0;i<DATA.industry.length;i++){
+    var d=DATA.industry[i].date_str;
+    if(ds&&d<ds)continue;if(de&&d>de)continue;
+    out.push(DATA.industry[i]);
+  }
+  return out;
+}
+function getFilteredDaily(){
+  var ds=cfg.dateStart,de=cfg.dateEnd,out=[];
+  for(var i=0;i<DATA.daily.length;i++){
+    var d=DATA.daily[i].date_str;
+    if(ds&&d<ds)continue;if(de&&d>de)continue;
+    out.push(DATA.daily[i]);
+  }
+  return out;
+}
+
+function resample(dataRows,dailyRows,bucketSize){
+  if(bucketSize<=1)return{rows:dataRows,daily:dailyRows};
+  var byInd={};
+  for(var i=0;i<dataRows.length;i++){
+    var ind=dataRows[i].industry;
+    if(!byInd[ind])byInd[ind]=[];
+    byInd[ind].push(dataRows[i]);
+  }
+  var out=[];
+  for(var ind in byInd){
+    var rows=byInd[ind];
+    var nB=Math.ceil(rows.length/bucketSize);
+    for(var b=0;b<nB;b++){
+      var s=b*bucketSize,e=Math.min(s+bucketSize,rows.length);
+      var chunk=rows.slice(s,e);
+      var sumAmt=0,sumRet=0,cnt=0;
+      for(var j=0;j<chunk.length;j++){sumAmt+=chunk[j].total_amount||0;sumRet+=chunk[j].mean_ret||0;cnt++;}
+      out.push({date_str:chunk[chunk.length-1].date_str,industry:ind,total_amount:sumAmt,mean_ret:cnt>0?sumRet/cnt:0,_bucketStart:chunk[0].date_str});
+    }
+  }
+  var newDaily=[];
+  var nD=Math.ceil(dailyRows.length/bucketSize);
+  for(var b2=0;b2<nD;b2++){
+    var s2=b2*bucketSize,e2=Math.min(s2+bucketSize,dailyRows.length);
+    var chunk2=dailyRows.slice(s2,e2);
+    var sumR=0,sumA=0,cnt2=0;
+    for(var k=0;k<chunk2.length;k++){sumR+=chunk2[k].mean_ret||0;sumA+=chunk2[k].total_amount||0;cnt2++;}
+    newDaily.push({date_str:chunk2[chunk2.length-1].date_str,mean_ret:cnt2>0?sumR/cnt2:0,total_amount:sumA,_bucketStart:chunk2[0].date_str});
+  }
+  return{rows:out,daily:newDaily};
+}
+
+// ═══ 核心计算：份额矩阵 + 增量/增速 ═══
+function computeShareMatrix(){
+  var rawInd=getFilteredIndustry();
+  var rawDaily=getFilteredDaily();
+  var bucketSize=parseInt(cfg.granularity)||1;
+  var rs=resample(rawInd,rawDaily,bucketSize);
+  var indRows=rs.rows;
+  var dailyRows=rs.daily;
+  if(dailyRows.length<2)return null;
+
+  var dates=[];
+  for(var i=0;i<dailyRows.length;i++)dates.push(dailyRows[i].date_str);
+  var nDates=dates.length;
+
+  // 收集行业
+  var indSet={};
+  for(var i2=0;i2<indRows.length;i2++)indSet[indRows[i2].industry]=true;
+  var industries=Object.keys(indSet);
+
+  // 绝对额矩阵
+  var absMatrix={};
+  for(var i3=0;i3<industries.length;i3++)absMatrix[industries[i3]]={};
+  for(var r=0;r<indRows.length;r++){
+    var row=indRows[r];
+    absMatrix[row.industry][row.date_str]=row.total_amount||0;
+  }
+
+  // 每天总量 → 占比矩阵
+  var shareMatrix={};
+  for(var i4=0;i4<industries.length;i4++)shareMatrix[industries[i4]]={};
+  for(var d=0;d<nDates;d++){
+    var total=0;
+    for(var ind=0;ind<industries.length;ind++)total+=(absMatrix[industries[ind]][dates[d]]||0);
+    for(var ind2=0;ind2<industries.length;ind2++){
+      var v=absMatrix[industries[ind2]][dates[d]]||0;
+      shareMatrix[industries[ind2]][dates[d]]=total>0?v/total:0;
+    }
+  }
+
+  // 行业按均份额排序
+  var indTotals=[];
+  for(var i5=0;i5<industries.length;i5++){
+    var sum=0;
+    for(var d2=0;d2<nDates;d2++)sum+=(shareMatrix[industries[i5]][dates[d2]]||0);
+    indTotals.push({name:industries[i5],val:sum/nDates});
+  }
+  indTotals.sort(function(a,b){return b.val-a.val;});
+
+  // Top N
+  var topInds=indTotals.slice(0,parseInt(cfg.topN)).map(function(t){return t.name;});
+
+  // 分配颜色
+  var indColor={};
+  for(var i6=0;i6<topInds.length;i6++)indColor[topInds[i6]]=PALETTE[i6%PALETTE.length];
+
+  return{
+    dates:dates,industries:topInds,shareMatrix:shareMatrix,absMatrix:absMatrix,
+    daily:dailyRows,indColor:indColor,nDates:nDates
+  };
+}
+
+// ═══ 增量计算 (Δshare over window) ═══
+function computeDeltas(rd){
+  // 对每个行业，在当前hover/最新日期计算 Δshare vs N日前
+  var ws=parseInt(cfg.windowSize);
+  var refIdx=hoverInfo?hoverInfo.dateIdx:(rd.nDates-1);
+  var prevIdx=Math.max(0,refIdx-ws);
+  var refDate=rd.dates[refIdx];
+  var prevDate=rd.dates[prevIdx];
+
+  var deltas=[];
+  for(var i=0;i<rd.industries.length;i++){
+    var ind=rd.industries[i];
+    var curShare=rd.shareMatrix[ind][refDate]||0;
+    var prevShare=rd.shareMatrix[ind][prevDate]||0;
+    var dShare=curShare-prevShare;
+    var curAbs=rd.absMatrix[ind][refDate]||0;
+    var prevAbs=rd.absMatrix[ind][prevDate]||0;
+    var growthRate=prevShare>0?(curShare-prevShare)/prevShare*100:0;
+    var absDelta=curAbs-prevAbs;
+    deltas.push({
+      industry:ind,color:rd.indColor[ind],
+      curShare:curShare,prevShare:prevShare,dShare:dShare,
+      growthRate:growthRate,absDelta:absDelta,
+      curAbs:curAbs,prevAbs:prevAbs
+    });
+  }
+  deltas.sort(function(a,b){return b.dShare-a.dShare;});
+  return{items:deltas,refDate:refDate,prevDate:prevDate,refIdx:refIdx,prevIdx:prevIdx,ws:ws};
+}
+
+// ═══ 增速热力图数据 ═══
+function computeHeatmap(rd){
+  var ws=parseInt(cfg.windowSize);
+  // 对每个行业 × 每个时间点，计算 share rolling delta
+  var data={};
+  for(var i=0;i<rd.industries.length;i++){
+    var ind=rd.industries[i];
+    var vals=[];
+    for(var d=0;d<rd.nDates;d++){
+      var cur=rd.shareMatrix[ind][rd.dates[d]]||0;
+      var prevIdx=Math.max(0,d-ws);
+      var prev=rd.shareMatrix[ind][rd.dates[prevIdx]]||0;
+      vals.push(prev>0?(cur-prev)/prev*100:0);
+    }
+    data[ind]=vals;
+  }
+  return data;
+}
+
+// ═══ 渲染 ═══
+function render(){
+  if(!DATA)return;
+  W=canvas.width;H=canvas.height;
+
+  rd=computeShareMatrix();
+  if(!rd)return;
+  renderData=rd;
+
+  // 预计算heatmap
+  rd.heatmap=computeHeatmap(rd);
+
+  draw();
+}
+
+var rd=null;
+
+function xScaleStream(dateIdx,nDates,chartW,padX){
+  var baseX=padX+(dateIdx/Math.max(1,nDates-1))*chartW;
+  var centerX=padX+chartW/2;
+  return centerX+(baseX-centerX)*zoomState.scale+zoomState.offsetX;
+}
+
+function smoothPath(pts,smoothness){
+  if(pts.length<2||smoothness<=0)return pts;
+  var out=[];
+  for(var i=0;i<pts.length;i++){
+    var p0=pts[Math.max(0,i-1)],p1=pts[i],p2=pts[Math.min(pts.length-1,i+1)];
+    out.push({x:p1.x,y:p1.y*(1-smoothness*0.3)+(p0.y+p2.y)*smoothness*0.15});
+  }
+  return out;
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a0a12';
+  ctx.fillRect(0,0,W,H);
+  if(!renderData)return;
+
+  // ═══ 面板布局 ═══
+  var padX=50;
+  var availH=H-LAYOUT.padTop-LAYOUT.padBottom;
+  // 上面板: streamgraph (55%)
+  var streamH=availH*0.50;
+  var streamY=LAYOUT.padTop;
+  // 下面板: 左=增量bar(50%), 右=热力图(50%)
+  var bottomY=streamY+streamH+LAYOUT.gap;
+  var bottomH=availH*0.45;
+  var bottomW=(W-padX*2-LAYOUT.gap)/2;
+  var barX=padX, barY=bottomY, barW=bottomW, barH=bottomH;
+  var heatX=padX+bottomW+LAYOUT.gap, heatY=bottomY, heatW=bottomW, heatH=bottomH;
+
+  // 分隔线
+  ctx.strokeStyle='rgba(100,100,130,0.2)';
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.moveTo(0,streamY+streamH+LAYOUT.gap/2);
+  ctx.lineTo(W,streamY+streamH+LAYOUT.gap/2);
+  ctx.stroke();
+
+  drawStreamGraph(streamY,streamH,padX);
+  drawDeltaBars(barX,barY,barW,barH);
+  drawHeatmap(heatX,heatY,heatW,heatH);
+}
+
+// ═══ Panel 1: Streamgraph (上) ═══
+function drawStreamGraph(yOffset,chartH,padX){
+  var rd=renderData;
+  var nDates=rd.nDates;
+  var chartW=W-padX*2;
+  var padY=yOffset+8;
+
+  // 计算stream bands
+  var upper=new Array(nDates),lower=new Array(nDates);
+  for(var d=0;d<nDates;d++){upper[d]=padY+chartH/2;lower[d]=padY+chartH/2;}
+
+  var maxVal=0;
+  for(var d2=0;d2<nDates;d2++){
+    var dayTotal=0;
+    for(var ind=0;ind<rd.industries.length;ind++)dayTotal+=(rd.shareMatrix[rd.industries[ind]][rd.dates[d2]]||0);
+    if(dayTotal>maxVal)maxVal=dayTotal;
+  }
+  if(maxVal===0)return;
+
+  var bands=[];
+  for(var bi=0;bi<rd.industries.length;bi++){
+    var indName=rd.industries[bi];
+    var color=rd.indColor[indName];
+    var pts=[];
+    for(var di=0;di<nDates;di++){
+      var v=(rd.shareMatrix[indName][rd.dates[di]]||0)/maxVal*(chartH*0.9);
+      if(bi%2===0){var y0=upper[di];var y1=y0+v;upper[di]=y1;pts.push({date:rd.dates[di],y0:y0,y1:y1,val:v});}
+      else{var y0b=lower[di]-v;var y1b=lower[di];lower[di]=y0b;pts.push({date:rd.dates[di],y0:y0b,y1:y1b,val:v});}
+    }
+    bands.push({industry:indName,points:pts,color:color});
+  }
+
+  // 绘制
+  for(var bi2=0;bi2<bands.length;bi2++){
+    var band=bands[bi2];
+    var pts0=[],pts1=[];
+    for(var di2=0;di2<nDates;di2++){
+      var x=xScaleStream(di2,nDates,chartW,padX);
+      pts0.push({x:x,y:band.points[di2].y0});
+      pts1.push({x:x,y:band.points[di2].y1});
+    }
+    if(cfg.smooth>0){pts0=smoothPath(pts0,cfg.smooth);pts1=smoothPath(pts1,cfg.smooth);}
+
+    var isHover=hoverInfo&&hoverInfo.band&&hoverInfo.band.industry===band.industry;
+    var isDim=hoverInfo&&hoverInfo.band&&!isHover;
+
+    ctx.beginPath();
+    ctx.moveTo(pts0[0].x,pts0[0].y);
+    for(var i=1;i<pts0.length;i++)ctx.lineTo(pts0[i].x,pts0[i].y);
+    for(var i2=pts1.length-1;i2>=0;i2--)ctx.lineTo(pts1[i2].x,pts1[i2].y);
+    ctx.closePath();
+    ctx.fillStyle=band.color+(isDim?'30':'cc');
+    ctx.fill();
+
+    if(isHover){
+      ctx.strokeStyle=band.color;
+      ctx.lineWidth=2;
+      ctx.globalAlpha=0.7;
+      ctx.beginPath();
+      ctx.moveTo(pts0[0].x,pts0[0].y);
+      for(var i3=1;i3<pts0.length;i3++)ctx.lineTo(pts0[i3].x,pts0[i3].y);
+      ctx.moveTo(pts1[0].x,pts1[0].y);
+      for(var i4=1;i4<pts1.length;i4++)ctx.lineTo(pts1[i4].x,pts1[i4].y);
+      ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  // hover指示线
+  if(hoverInfo&&hoverInfo.dateIdx!==undefined){
+    var hx=xScaleStream(hoverInfo.dateIdx,nDates,chartW,padX);
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.lineWidth=1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(hx,padY);ctx.lineTo(hx,padY+chartH);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 时间轴
+  var axisY=padY+chartH;
+  ctx.strokeStyle='rgba(100,100,130,0.3)';
+  ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(padX,axisY);ctx.lineTo(W-padX,axisY);ctx.stroke();
+
+  var labelStep=Math.max(1,Math.floor(nDates/10));
+  ctx.fillStyle='rgba(200,200,220,0.5)';
+  ctx.font='9px monospace';
+  ctx.textAlign='center';
+  for(var dl=0;dl<nDates;dl+=labelStep){
+    var dx=xScaleStream(dl,nDates,chartW,padX);
+    ctx.beginPath();ctx.moveTo(dx,axisY);ctx.lineTo(dx,axisY+3);ctx.stroke();
+    var dlbl=rd.dates[dl];
+    if(dlbl.length>=7)dlbl=dlbl.slice(0,7);
+    ctx.fillText(dlbl,dx,axisY+13);
+  }
+
+  // 面板标题
+  ctx.fillStyle='rgba(180,200,255,0.6)';
+  ctx.font='bold 10px monospace';
+  ctx.textAlign='left';
+  ctx.fillText('资金分布 · STREAMGRAPH（行业成交额占比）',padX,padY-2);
+
+  // 存band信息供hover用
+  renderData.streamBands=bands;
+  renderData.streamLayout={y0:padY,y1:padY+chartH,padX:padX,chartW:chartW,nDates:nDates};
+}
+
+// ═══ Panel 2: 增量对比 bar (左下) ═══
+function drawDeltaBars(x,y,w,h){
+  var rd=renderData;
+  var deltaInfo=computeDeltas(rd);
+  var items=deltaInfo.items;
+
+  var padL=90,padR=90,padT=22,padB=8;
+  var chartW=w-padL-padR;
+  var chartH=h-padT-padB;
+  var midX=x+padL+chartW/2;
+
+  // 面板标题
+  ctx.fillStyle='rgba(180,200,255,0.6)';
+  ctx.font='bold 10px monospace';
+  ctx.textAlign='left';
+  ctx.fillText('增量对比 · Δ SHARE（'+deltaInfo.ws+'日窗口）',x+4,y+14);
+
+  // 副标题: 参考日期
+  ctx.fillStyle='rgba(200,200,220,0.4)';
+  ctx.font='9px monospace';
+  ctx.textAlign='right';
+  ctx.fillText(deltaInfo.prevDate.slice(0,7)+' → '+deltaInfo.refDate.slice(0,7),x+w-4,y+14);
+
+  // 找最大abs delta用于缩放
+  var maxAbs=0;
+  for(var i=0;i<items.length;i++)maxAbs=Math.max(maxAbs,Math.abs(items[i].dShare));
+  if(maxAbs===0)maxAbs=0.001;
+
+  // 中线
+  ctx.strokeStyle='rgba(100,100,130,0.3)';
+  ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(midX,y+padT);ctx.lineTo(midX,y+padT+chartH);ctx.stroke();
+
+  var rowH=chartH/Math.max(items.length,1);
+  var barH=Math.min(rowH*0.7,14);
+
+  for(var i2=0;i2<items.length;i2++){
+    var it=items[i2];
+    var ry=y+padT+i2*rowH+(rowH-barH)/2;
+    var barLen=(it.dShare/maxAbs)*(chartW/2)*0.95;
+    var isGain=it.dShare>0;
+
+    // 行业名 (左侧)
+    ctx.fillStyle=it.color;
+    ctx.font='9px monospace';
+    ctx.textAlign='right';
+    var shortName=it.industry.length>5?it.industry.slice(0,5):it.industry;
+    ctx.fillText(shortName,x+padL-4,ry+barH/2+3);
+
+    // bar
+    var bx=isGain?midX:midX+barLen;
+    ctx.fillStyle=isGain?'rgba(60,177,75,0.8)':'rgba(230,25,75,0.8)';
+    ctx.fillRect(bx,ry,Math.abs(barLen),barH);
+
+    // bar边框
+    ctx.strokeStyle=it.color;
+    ctx.lineWidth=1;
+    ctx.globalAlpha=0.5;
+    ctx.strokeRect(bx,ry,Math.abs(barLen),barH);
+    ctx.globalAlpha=1;
+
+    // 数值标签
+    ctx.fillStyle=isGain?'#3cb44b':'#e6194B';
+    ctx.font='bold 9px monospace';
+    ctx.textAlign=isGain?'left':'right';
+    var valStr=(isGain?'+':'')+(it.dShare*100).toFixed(2)+'%';
+    var lblX=isGain?midX+barLen+3:midX+barLen-3;
+    ctx.fillText(valStr,lblX,ry+barH/2+3);
+
+    // 增速 (右侧)
+    ctx.fillStyle='rgba(200,200,220,0.5)';
+    ctx.font='8px monospace';
+    ctx.textAlign='left';
+    var grStr=(it.growthRate>=0?'↑':'↓')+Math.abs(it.growthRate).toFixed(0)+'%';
+    ctx.fillText(grStr,x+padL+chartW+4,ry+barH/2+3);
+  }
+
+  // 底部标注
+  ctx.fillStyle='rgba(200,200,220,0.3)';
+  ctx.font='8px monospace';
+  ctx.textAlign='center';
+  ctx.fillText('← 资金流出',midX-chartW/4,y+h-1);
+  ctx.fillText('资金流入 →',midX+chartW/4,y+h-1);
+}
+
+// ═══ Panel 3: 增速热力图 (右下) ═══
+function drawHeatmap(x,y,w,h){
+  var rd=renderData;
+  var inds=rd.industries;
+  var nDates=rd.nDates;
+  var padL=55,padR=6,padT=22,padB=16;
+  var chartW=w-padL-padR;
+  var chartH=h-padT-padB;
+  var hm=rd.heatmap;
+
+  // 面板标题
+  ctx.fillStyle='rgba(180,200,255,0.6)';
+  ctx.font='bold 10px monospace';
+  ctx.textAlign='left';
+  ctx.fillText('增速热力图 · MOMENTUM HEATMAP（'+cfg.windowSize+'日增速%）',x+4,y+14);
+
+  var rowH=chartH/inds.length;
+  var colW=chartW/nDates;
+
+  // 找颜色范围
+  var vMax=0;
+  for(var ind in hm){
+    for(var d=0;d<hm[ind].length;d++)vMax=Math.max(vMax,Math.abs(hm[ind][d]));
+  }
+  vMax=Math.max(vMax,5);
+
+  // 背景填充
+  ctx.fillStyle='#151525';
+  ctx.fillRect(x+padL,y+padT,chartW,chartH);
+
+  // 绘制热力图 — 用实色而非alpha渐变
+  // 先画热力图cell
+  for(var i=0;i<inds.length;i++){
+    var vals=hm[inds[i]];
+    var ry=y+padT+i*rowH;
+
+    for(var d2=0;d2<nDates;d2++){
+      var v=vals[d2]||0;
+      // 非线性映射: sqrt提升小值对比度
+      var intensity=Math.min(Math.sqrt(Math.abs(v)/vMax),1);
+      var cellX=x+padL+d2*colW;
+      var cellW=Math.max(colW-0.5,0.5);
+
+      if(intensity<0.03){
+        // 近零: 深灰底色
+        ctx.fillStyle='#1a1a2a';
+      }else{
+        // 插值: 从暗底色到高饱和色
+        var t=intensity;
+        if(v>0){
+          // 正: 暗青 → 鲜亮黄绿
+          var r1=20,g1=40,b1=40;    // 暗
+          var r2=120,g2=255,b2=80;  // 亮黄绿
+          ctx.fillStyle='rgb('+Math.round(r1+(r2-r1)*t)+','+Math.round(g1+(g2-g1)*t)+','+Math.round(b1+(b2-b1)*t)+')';
+        }else{
+          // 负: 暗紫 → 鲜亮红橙
+          var r1b=40,g1b=20,b1b=40;   // 暗
+          var r2b=255,g2b=100,b2b=60; // 亮红橙
+          ctx.fillStyle='rgb('+Math.round(r1b+(r2b-r1b)*t)+','+Math.round(g1b+(g2b-g1b)*t)+','+Math.round(b1b+(b2b-b1b)*t)+')';
+        }
+      }
+      ctx.fillRect(cellX,ry,cellW,rowH-0.5);
+    }
+  }
+
+  // 行业标签 — 画在cell之后，左侧外部，确保不被覆盖
+  ctx.textAlign='right';
+  ctx.textBaseline='middle';
+  ctx.lineWidth=3;
+  ctx.strokeStyle='rgba(0,0,0,0.8)';
+  ctx.miterLimit=2;
+  for(var i2=0;i2<inds.length;i2++){
+    var ry2=y+padT+i2*rowH+rowH/2;
+    var sn2=inds[i2].length>5?inds[i2].slice(0,5):inds[i2];
+    ctx.font='bold 9px monospace';
+    // 描边
+    ctx.strokeText(sn2,x+padL-3,ry2);
+    // 填充
+    ctx.fillStyle=rd.indColor[inds[i2]];
+    ctx.fillText(sn2,x+padL-3,ry2);
+  }
+  ctx.textBaseline='alphabetic';
+  ctx.lineWidth=1;
+
+  // hover指示列
+  if(hoverInfo&&hoverInfo.dateIdx!==undefined){
+    var hx=x+padL+hoverInfo.dateIdx*colW;
+    ctx.strokeStyle='rgba(255,255,255,0.4)';
+    ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(hx,y+padT);ctx.lineTo(hx,y+padT+chartH);ctx.stroke();
+  }
+
+  // 时间轴标注
+  ctx.fillStyle='rgba(200,200,220,0.4)';
+  ctx.font='8px monospace';
+  ctx.textAlign='center';
+  var labelStep=Math.max(1,Math.floor(nDates/8));
+  var axisY2=y+padT+chartH;
+  for(var dl=0;dl<nDates;dl+=labelStep){
+    var dx=x+padL+dl*colW+colW/2;
+    var dlbl=rd.dates[dl];
+    if(dlbl.length>=7)dlbl=dlbl.slice(0,7);
+    ctx.fillText(dlbl,dx,axisY2+9);
+  }
+
+  // 色阶图例
+  var legY=y+padT-4;
+  var legW=60;
+  var legX=x+w-padR-legW;
+  for(var li=0;li<legW;li++){
+    var t=li/(legW-1);
+    var intensity=Math.sqrt(Math.abs(t*2-1)); // 0→1→0
+    var vPos=t>0.5;
+    if(intensity<0.03){
+      ctx.fillStyle='#1a1a2a';
+    }else if(vPos){
+      var r1=20,g1=40,b1=40,r2=120,g2=255,b2=80;
+      ctx.fillStyle='rgb('+Math.round(r1+(r2-r1)*intensity)+','+Math.round(g1+(g2-g1)*intensity)+','+Math.round(b1+(b2-b1)*intensity)+')';
+    }else{
+      var r1b=40,g1b=20,b1b=40,r2b=255,g2b=100,b2b=60;
+      ctx.fillStyle='rgb('+Math.round(r1b+(r2b-r1b)*intensity)+','+Math.round(g1b+(g2b-g1b)*intensity)+','+Math.round(b1b+(b2b-b1b)*intensity)+')';
+    }
+    ctx.fillRect(legX+li,legY,1,4);
+  }
+  ctx.fillStyle='rgba(200,200,220,0.4)';
+  ctx.font='7px monospace';
+  ctx.textAlign='right';
+  ctx.fillText('-'+vMax.toFixed(0)+'%',legX,y+padT-6);
+  ctx.textAlign='left';
+  ctx.fillText('+'+vMax.toFixed(0)+'%',legX+legW,y+padT-6);
+}
+
+// ═══ 交互 ═══
+function onMouseMove(event){
+  if(zoomState.dragging)return;
+  if(!renderData||!renderData.streamLayout)return;
+  var rect=canvas.getBoundingClientRect();
+  var mx=event.clientX-rect.left;
+  var my=event.clientY-rect.top;
+
+  var sl=renderData.streamLayout;
+  var nDates=sl.nDates;
+  var chartW=sl.chartW;
+
+  // 反算dateIdx from x position (考虑缩放)
+  var centerX=sl.padX+chartW/2;
+  var adjustedMx=(mx-centerX-zoomState.offsetX)/zoomState.scale+centerX;
+  var dateIdx=Math.round((adjustedMx-sl.padX)/chartW*(nDates-1));
+  if(dateIdx<0)dateIdx=0;
+  if(dateIdx>=nDates)dateIdx=nDates-1;
+
+  // 检测在哪个band
+  var foundBand=null;
+  if(renderData.streamBands&&my>=sl.y0&&my<=sl.y1){
+    for(var bi=0;bi<renderData.streamBands.length;bi++){
+      var pt=renderData.streamBands[bi].points[dateIdx];
+      if(pt&&my>=pt.y0&&my<=pt.y1){foundBand=renderData.streamBands[bi];break;}
+    }
+  }
+
+  var tt=document.getElementById('tooltip');
+  if(foundBand||dateIdx>=0){
+    hoverInfo={band:foundBand,dateIdx:dateIdx};
+    var dateStr=renderData.dates[dateIdx];
+    var ws=parseInt(cfg.windowSize);
+    var prevIdx=Math.max(0,dateIdx-ws);
+    var prevDate=renderData.dates[prevIdx];
+
+    tt.style.display='block';
+    tt.style.left=Math.min(event.clientX+15,W-220)+'px';
+    tt.style.top=(event.clientY+15)+'px';
+
+    if(foundBand){
+      var ind=foundBand.industry;
+      var curShare=renderData.shareMatrix[ind][dateStr]||0;
+      var prevShare=renderData.shareMatrix[ind][prevDate]||0;
+      var dShare=(curShare-prevShare)*100;
+      var growthRate=prevShare>0?((curShare-prevShare)/prevShare*100):0;
+      var curAbs=renderData.absMatrix[ind][dateStr]||0;
+      var prevAbs=renderData.absMatrix[ind][prevDate]||0;
+      var absDelta=curAbs-prevAbs;
+
+      var html='<div class="tt-title" style="color:'+renderData.indColor[ind]+'">'+ind+'</div>';
+      html+='<div class="tt-row"><span>日期</span><span class="tt-val">'+dateStr.slice(0,7)+'</span></div>';
+      html+='<div class="tt-section"></div>';
+      html+='<div class="tt-row"><span>当前份额</span><span class="tt-val">'+(curShare*100).toFixed(2)+'%</span></div>';
+      html+='<div class="tt-row"><span>'+ws+'日前份额</span><span class="tt-val" style="opacity:0.6">'+(prevShare*100).toFixed(2)+'%</span></div>';
+      html+='<div class="tt-section"></div>';
+      html+='<div class="tt-row"><span>份额增量 Δ</span><span class="tt-val" style="color:'+(dShare>0?'#3cb44b':'#e6194B')+'">'+(dShare>0?'+':'')+dShare.toFixed(2)+'pp</span></div>';
+      html+='<div class="tt-row"><span>增速</span><span class="tt-val" style="color:'+(growthRate>0?'#3cb44b':'#e6194B')+'">'+(growthRate>0?'+':'')+growthRate.toFixed(1)+'%</span></div>';
+      html+='<div class="tt-row"><span>金额增量</span><span class="tt-val" style="color:'+(absDelta>0?'#3cb44b':'#e6194B')+'">'+(absDelta>0?'+':'')+(absDelta/1e8).toFixed(0)+'亿</span></div>';
+      html+='<div class="tt-section"></div>';
+      html+='<div class="tt-row"><span>当前成交额</span><span class="tt-val">'+(curAbs/1e8).toFixed(0)+'亿</span></div>';
+      html+='<div class="tt-row"><span>'+ws+'日前</span><span class="tt-val" style="opacity:0.6">'+(prevAbs/1e8).toFixed(0)+'亿</span></div>';
+
+      // 排名变化
+      var allDeltas=[];
+      for(var ai=0;ai<renderData.industries.length;ai++){
+        var indA=renderData.industries[ai];
+        var cs=renderData.shareMatrix[indA][dateStr]||0;
+        var ps=renderData.shareMatrix[indA][prevDate]||0;
+        allDeltas.push({name:indA,d:cs-ps});
+      }
+      allDeltas.sort(function(a,b){return b.d-a.d;});
+      for(var ri=0;ri<allDeltas.length;ri++){
+        if(allDeltas[ri].name===ind){
+          html+='<div class="tt-row"><span>增速排名</span><span class="tt-val">#'+(ri+1)+'/'+allDeltas.length+'</span></div>';
+          break;
+        }
+      }
+      tt.innerHTML=html;
+    }else{
+      var html2='<div class="tt-title" style="color:#6bf">'+dateStr+'</div>';
+      html2+='<div class="tt-row"><span>采样点</span><span class="tt-val">#'+(dateIdx+1)+'/'+nDates+'</span></div>';
+      tt.innerHTML=html2;
+    }
+    draw();
+  }else{
+    hoverInfo=null;
+    tt.style.display='none';
+    draw();
+  }
+}
+
+function onMouseLeave(){
+  hoverInfo=null;
+  document.getElementById('tooltip').style.display='none';
+  if(renderData)draw();
+}
+
+function onResize(){
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+  W=canvas.width;H=canvas.height;
+  if(DATA)render();
+}
+
+// ═══ INIT ═══
+function init(){
+  canvas=document.createElement('canvas');
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+  document.body.appendChild(canvas);
+  ctx=canvas.getContext('2d');
+  W=canvas.width;H=canvas.height;
+
+  canvas.addEventListener('mousemove',onMouseMove);
+  canvas.addEventListener('mouseleave',onMouseLeave);
+  window.addEventListener('resize',onResize);
+
+  // 滚轮缩放
+  canvas.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var rect=canvas.getBoundingClientRect();
+    var mx=e.clientX-rect.left;
+    var factor=e.deltaY<0?1.12:1/1.12;
+    var newScale=Math.max(1,Math.min(20,zoomState.scale*factor));
+    var padX=50;
+    var chartW=W-padX*2;
+    var centerX=padX+chartW/2;
+    var mouseFromCenter=mx-centerX-zoomState.offsetX;
+    zoomState.offsetX=mx-centerX-mouseFromCenter*(newScale/zoomState.scale);
+    zoomState.scale=newScale;
+    if(renderData)draw();
+  },{passive:false});
+
+  // 拖拽
+  canvas.addEventListener('mousedown',function(e){
+    zoomState.dragging=true;
+    zoomState.lastX=e.clientX;
+    canvas.style.cursor='grabbing';
+  });
+  window.addEventListener('mousemove',function(e){
+    if(!zoomState.dragging)return;
+    zoomState.offsetX+=e.clientX-zoomState.lastX;
+    zoomState.lastX=e.clientX;
+    if(renderData)draw();
+  });
+  window.addEventListener('mouseup',function(){
+    zoomState.dragging=false;
+    canvas.style.cursor='crosshair';
+  });
+
+  // 双击重置
+  canvas.addEventListener('dblclick',function(){
+    zoomState={scale:1,offsetX:0,offsetY:0,dragging:false,lastX:0,lastY:0};
+    if(renderData)draw();
+  });
+
+  // 控件
+  document.getElementById('windowSize').addEventListener('change',function(e){cfg.windowSize=parseInt(e.target.value);render();});
+  document.getElementById('granularity').addEventListener('change',function(e){cfg.granularity=parseInt(e.target.value);render();});
+  document.getElementById('dateStart').addEventListener('change',function(e){cfg.dateStart=e.target.value;render();});
+  document.getElementById('dateEnd').addEventListener('change',function(e){cfg.dateEnd=e.target.value;render();});
+  document.getElementById('smoothSlider').addEventListener('input',function(e){
+    cfg.smooth=parseFloat(e.target.value);
+    document.getElementById('smoothVal').textContent=cfg.smooth.toFixed(1);
+    if(renderData)draw();
+  });
+  document.getElementById('topN').addEventListener('change',function(e){cfg.topN=parseInt(e.target.value);render();});
+  document.getElementById('quickRange').addEventListener('change',function(e){
+    var v=e.target.value;
+    if(!v)return;
+    if(v==='all'){cfg.dateStart=DATA.daily[0].date_str;cfg.dateEnd=DATA.daily[DATA.daily.length-1].date_str;}
+    else{var p=v.split(',');cfg.dateStart=p[0];cfg.dateEnd=p[1];}
+    document.getElementById('dateStart').value=cfg.dateStart;
+    document.getElementById('dateEnd').value=cfg.dateEnd;
+    render();
+  });
+
+  loadData();
+}
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',init);
+}else{init();}
+</script>
+</body>
+</html>

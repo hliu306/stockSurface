@@ -104,6 +104,7 @@ h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0;
 <div class="panel">
   <div class="panel-title">市场状态时间线 — 11年状态演化
     <span style="font-size:9px;color:#567;font-weight:normal;">（点击切换选中状态）</span>
+    <span style="font-size:9px;color:#567;font-weight:normal;float:right;" id="dataAsOf">数据加载中…</span>
   </div>
   <canvas id="timelineCanvas"></canvas>
   <div id="stateChips" style="margin:4px 0"></div>
@@ -165,6 +166,13 @@ fetch('market_states.json?_=' + Date.now())
 .then(r => r.json())
 .then(d => {
   DATA = d;
+  var asOf = document.getElementById('dataAsOf');
+  if (asOf && DATA.meta && DATA.meta.data_range) {
+    var rng = DATA.meta.data_range;
+    var lastPt = (DATA.monthly_timeline && DATA.monthly_timeline.length)
+      ? DATA.monthly_timeline[DATA.monthly_timeline.length - 1].date : '';
+    asOf.textContent = '数据截至 ' + rng.split('~')[1] + '（时间线为月度采样，最新采样点 ' + lastPt + '）';
+  }
   init();
 })
 .catch(e => {

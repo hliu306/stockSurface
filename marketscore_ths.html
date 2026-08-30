@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>A股市场+板块评分 — Market & Sector Score</title>
+<title>A股市场+板块评分 · 同花顺行业版</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -31,9 +31,8 @@ h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0; letter-spacing
 .panel-title .hint { font-size:9px; color:#567; font-weight:normal; }
 
 .layout { margin-top:42px; padding:4px; display:grid;
-  grid-template-columns: 1fr 1fr; gap:6px; max-width:1700px; }
-.layout > .panel:nth-child(1) { grid-column:1/3; }
-.layout > .panel:nth-child(2) { grid-column:1/3; }
+  grid-template-columns: 1fr; gap:8px; max-width:1700px; }
+.layout > .panel { grid-column:1; }
 
 canvas { display:block; width:100%; }
 #marketCanvas { height:300px; cursor:crosshair; }
@@ -115,6 +114,10 @@ canvas { display:block; width:100%; }
 <div class="layout">
 
 <!-- 市场评分走势 -->
+<div style="background:#141a2e;border:1px solid #2a3350;border-radius:8px;padding:10px 16px;margin:10px 0;font-size:12px;color:#9fb0d0;line-height:1.7">
+<b style="color:#e8ecf8">同花顺行业版</b> · 分类=同花顺90个二级行业(881xxx官方编码, 点击色块跳同花顺板块页看蜡烛图) · 数据=本地K线缓存(~5160只)<br>
+<span style="color:#889">已知局限: 同花顺游客接口每个行业最多返回100只成分股, 15个大行业被截断且按当日涨幅排序(对截断行业的评分有正向偏差); 覆盖4673只(约90%A股, 未含未上市新股与部分北交所)。申万版见 <a href="marketscore.html" style="color:#7aa2f7">marketscore.html</a></span>
+</div>
 <div class="panel">
   <div class="panel-title">MarketScore 市场状态评分走势 <span class="hint">（5档分类：强上涨/弱上涨/平衡轮动/弱下降/强下降）</span><span class="zoom-btn" data-target="marketCanvas" title="放大到整页">⛶ 放大</span></div>
   <canvas id="marketCanvas"></canvas>
@@ -150,7 +153,7 @@ canvas { display:block; width:100%; }
     </select>
     <label style="margin-left:8px;">显示top:</label>
     <select id="heatTop">
-      <option value="0">全部110</option>
+      <option value="0">全部90</option>
       <option value="30" selected>Top 30</option>
       <option value="20">Top 20</option>
       <option value="10">Top 10</option>
@@ -171,7 +174,7 @@ canvas { display:block; width:100%; }
     </select>
     <label style="margin-left:8px;">显示top:</label>
     <select id="tierTop">
-      <option value="0">全部110</option>
+      <option value="0">全部90</option>
       <option value="30" selected>Top 30</option>
       <option value="20">Top 20</option>
       <option value="10">Top 10</option>
@@ -238,7 +241,7 @@ var CYCLE_COLORS = {
 };
 
 // ── 加载 ──
-fetch('market_score.json?_=' + Date.now())
+fetch('market_score_ths.json?_=' + Date.now())
 .then(r => r.json())
 .then(d => { DATA = d; init(); })
 .catch(e => { document.body.innerHTML += '<div style="color:#f88;padding:20px">加载失败: '+e+'</div>'; });
@@ -482,7 +485,8 @@ function drawSectorHeat() {
     tip.style.top = ty + 'px';
     tip.innerHTML = '<b>' + selectedInds[i] + '</b> <span style="color:#889">' + dates[j] + '</span>' +
       '<br>评分: <b style="color:' + (r.score >= 0 ? '#E55939' : '#2878DC') + '">' + r.score.toFixed(3) + '</b>' +
-      (r.n ? '<br>成分股: ' + r.n : '');
+      (r.n ? '<br>成分股: ' + r.n : '') +
+      '<br>同花顺编码: <b>' + (r.ths_code || '—') + '</b>';
   };
   canvas.onmouseleave = function() { tip.style.display = 'none'; };
 }
@@ -544,7 +548,7 @@ function drawTierHeat() {
     q = [0,1,2,3].map(i => scores[Math.floor((scores.length-1) * [0.2,0.4,0.6,0.8][i])]);
   }
 
-  var padL = MODAL_ACTIVE ? 170 : 90, padR = MODAL_ACTIVE ? 64 : 46, padT = 10, padB = 24;
+  var padL = MODAL_ACTIVE ? 170 : 90, padR = MODAL_ACTIVE ? 82 : 58, padT = 10, padB = 24;
   var plotW = W - padL - padR, plotH = H - padT - padB;
   var cellW = plotW / nDates;
   var cellH = plotH / nInds;
@@ -579,17 +583,16 @@ function drawTierHeat() {
     ctx.fillText(name, padL - 4, padT + i * cellH + cellH/2 + rowFont * 0.35);
   }
 
-  // 右侧「最新档位编码」列: 5=极强 4=强 3=中性 2=弱 1=极弱
+  // 右侧「同花顺行业编码」列 (881xxx, 官方代码可直接在同花顺搜索)
   var codeX = W - padR / 2;
   var latestD = dates[dates.length - 1];
   ctx.textAlign = 'center';
-  ctx.font = 'bold ' + Math.max(9, Math.min(fz(11), Math.floor(cellH * 1.15))) + 'px sans-serif';
+  ctx.font = Math.max(8, Math.min(fz(11), Math.floor(cellH * 1.1))) + 'px sans-serif';
   for (var i = 0; i < nInds; i++) {
     var rl = dataMap[latestD + '|' + selectedInds[i]];
     if (!rl) continue;
-    var cl = (mode === 'quantile') ? tierColorQ(rl.score, q) : tierColor(rl.score);
-    ctx.fillStyle = cl[0];
-    ctx.fillText(cl[2], codeX, padT + i * cellH + cellH/2 + rowFont * 0.35);
+    ctx.fillStyle = '#9fb0d0';
+    ctx.fillText(rl.ths_code || '—', codeX, padT + i * cellH + cellH/2 + rowFont * 0.35);
   }
 
   // X轴年份 + 编码列头
@@ -599,7 +602,7 @@ function drawTierHeat() {
     ctx.fillText(dates[j].substring(0,4), padL + j * cellW + cellW/2, H - padB + 14);
   }
   ctx.fillStyle = '#889';
-  ctx.fillText('编码', codeX, H - padB + 14);
+  ctx.fillText('881编码', codeX, H - padB + 14);
 
   // 底部图例
   var legend = [TIER_STYLE[4], TIER_STYLE[3], TIER_STYLE[2], TIER_STYLE[1], TIER_STYLE[0]];
@@ -631,10 +634,21 @@ function drawTierHeat() {
     tip.style.left = tx + 'px';
     tip.style.top = ty + 'px';
     tip.innerHTML = '<b>' + selectedInds[i] + '</b> <span style="color:#889">' + dates[j] + '</span>' +
-      '<br>档位: <b style="color:' + res[0] + '">' + res[1] + '</b>（编码 ' + res[2] + '）' +
-      '<br>评分: <b>' + r.score.toFixed(3) + '</b>';
+      '<br>档位: <b style="color:' + res[0] + '">' + res[1] + '</b>（档位码 ' + res[2] + '）' +
+      '<br>评分: <b>' + r.score.toFixed(3) + '</b>' +
+      '<br>同花顺编码: <b>' + (r.ths_code || '—') + '</b>' +
+      '<br><span style="color:#667">点击色块 → 同花顺板块页(蜡烛图)</span>';
   };
   canvas.onmouseleave = function() { tip.style.display = 'none'; };
+  // 08-29: 点击色块 → 打开同花顺板块详情页 (含指数蜡烛图)
+  canvas.onclick = function(e) {
+    var mx = e.offsetX, my = e.offsetY;
+    if (mx < padL || mx > W - padR || my < padT || my > H - padB) return;
+    var j = Math.floor((mx - padL) / cellW), i = Math.floor((my - padT) / cellH);
+    if (i < 0 || i >= nInds || j < 0 || j >= nDates) return;
+    var r = dataMap[dates[j] + '|' + selectedInds[i]];
+    if (r && r.ths_code) window.open('http://q.10jqka.com.cn/thshy/detail/code/' + r.ths_code + '/', '_blank');
+  };
 }
 
 // ═══════════════════════════════════

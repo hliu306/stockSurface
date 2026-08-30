@@ -1,0 +1,14 @@
+{
+  "probes": [
+    {
+      "label": "depth_2013_full_year",
+      "freq": "5min",
+      "rows": 8000,
+      "first": "2013-12-31 15:00:00",
+      "last": "2013-05-02 14:00:00",
+      "truncated_hint": true
+    }
+  ],
+  "strategy": "one_shot_per_hour_oldest_first",
+  "ts": "2026-08-29 20:05:46"
+}

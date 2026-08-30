@@ -13,7 +13,7 @@ os.makedirs(OUTDIR, exist_ok=True)
 
 print('loading cache_td_v2.parquet (11.7M rows)...', flush=True)
 df = pd.read_parquet(os.path.join(BASE, 'cache_td_v2.parquet'),
-                     columns=['ts_code', 'trade_date', 'close', 'pre_close', 'amount', 'vol', 'pct_chg'])
+                     columns=['ts_code', 'trade_date', 'close', 'pre_close', 'amount', 'vol'])
 df['trade_date'] = df['trade_date'].astype(np.int32)   # key cols int32 per repo rule
 print('loaded', df.shape, 'range', df['trade_date'].min(), '-', df['trade_date'].max(), flush=True)
 

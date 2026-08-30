@@ -84,6 +84,42 @@ a { color:#7aa2f7; }
 </div>
 
 <div class="panel">
+  <div class="panel-title">板块评分五档热力图 · 90行业全景 <span class="hint">（5=极强(红) 4=强(橙) 3=中性(灰) 2=弱(浅蓝) 1=极弱(蓝) · 阈值±0.5/±0.15 · 点击行 → 切换下方行业）</span></div>
+  <div class="ctrl">
+    <label>阈值</label>
+    <select id="tierMode2">
+      <option value="fixed" selected>固定 (±0.5/±0.15)</option>
+      <option value="quantile">分位数 (20/40/60/80%)</option>
+    </select>
+    <label>范围</label>
+    <select id="tierRange2">
+      <option value="60">60日</option>
+      <option value="250" selected>1年</option>
+      <option value="500">2年</option>
+      <option value="1000">4年</option>
+      <option value="0">全部</option>
+    </select>
+    <label>显示top</label>
+    <select id="tierTop2">
+      <option value="0">全部90</option>
+      <option value="30" selected>Top 30</option>
+      <option value="20">Top 20</option>
+      <option value="10">Top 10</option>
+    </select>
+    <label>排序</label>
+    <select id="tierSort2">
+      <option value="score">最新评分</option>
+      <option value="mean">窗口均分</option>
+      <option value="trend">窗口变化</option>
+      <option value="code">881编码</option>
+    </select>
+    <span id="tierStatus2" style="color:#7a9;font-size:11px;margin-left:auto"></span>
+  </div>
+  <canvas id="tierCanvas"></canvas>
+  <div class="legend" id="tierLegend2"></div>
+</div>
+
+<div class="panel">
   <div class="panel-title">个股热力图 <span id="indTitle" style="color:#cde;font-weight:normal"></span></div>
   <div class="ctrl">
     <label>行业</label><select id="indSel"></select>
@@ -124,6 +160,10 @@ a { color:#7aa2f7; }
     </select>
     <span id="status"></span>
   </div>
+  <div style="border:1px dashed #345;border-radius:6px;padding:4px 6px;margin-bottom:6px;background:rgba(30,30,55,0.35)">
+    <div style="font-size:10px;color:#89a;margin-bottom:2px">本行业评分档位（与下方个股同一时间轴 · 灰点=缺评）<span id="rowTierHint"></span></div>
+    <canvas id="rowTierCanvas"></canvas>
+  </div>
   <canvas id="stockCanvas"></canvas>
   <div class="legend" id="legend"></div>
 </div>
@@ -133,6 +173,26 @@ a { color:#7aa2f7; }
 <div class="tooltip" id="tip"></div>
 
 <script>
+var TIER = null;        // stock_heat_tier.json
+var TIER_STYLE = [
+  ['#1A5FD0', '极弱', 1], ['#5FA8FF', '弱', 2], ['#8A8A9A', '中性', 3],
+  ['#FF9E4A', '强', 4], ['#FF4B3E', '极强', 5]
+];
+function tierColor(v) {
+  if (v >= 0.5)  return TIER_STYLE[4];
+  if (v >= 0.15) return TIER_STYLE[3];
+  if (v > -0.15) return TIER_STYLE[2];
+  if (v > -0.5)  return TIER_STYLE[1];
+  return TIER_STYLE[0];
+}
+function tierColorQ(v, q) {
+  if (v >= q[3]) return TIER_STYLE[4];
+  if (v >= q[2]) return TIER_STYLE[3];
+  if (v > q[1])  return TIER_STYLE[2];
+  if (v > q[0])  return TIER_STYLE[1];
+  return TIER_STYLE[0];
+}
+
 var IDX = null;          // stock_heat.json index
 var CACHE = {};          // code881 -> industry data
 var CUR = null;          // current industry data
@@ -338,6 +398,150 @@ function draw() {
   document.getElementById('indTitle').textContent = '— ' + CUR.industry + '(' + CUR.ths_code + ')';
 }
 
+// ═══ top panel: 90-industry tier heatmap (independent controls) ═══
+function tierVal(code, di) {
+  var arr = TIER.series[code];
+  if (!arr) return null;
+  // binary search by date index
+  var lo = 0, hi = arr.length - 1;
+  while (lo <= hi) { var mid = (lo + hi) >> 1;
+    if (arr[mid].d === di) return arr[mid];
+    if (arr[mid].d < di) lo = mid + 1; else hi = mid - 1; }
+  return null;
+}
+var TIER_ROWS = null, TIER_GEOM = null;
+function drawTierAll() {
+  var canvas = document.getElementById('tierCanvas');
+  if (!canvas || !TIER) return;
+  var rg = parseInt(document.getElementById('tierRange2').value);
+  var topN = parseInt(document.getElementById('tierTop2').value);
+  var mode = document.getElementById('tierMode2').value;
+  var sortMode = document.getElementById('tierSort2').value;
+  var dates = TIER.dates.slice(rg > 0 ? Math.max(0, TIER.dates.length - rg) : 0);
+
+  var codes = Object.keys(TIER.series);
+  var lastDi = dates[dates.length - 1];
+  function sc(c) { var v = tierVal(c, lastDi); return v ? v.s : null; }
+  function meanSc(c) {
+    var t = 0, n = 0;
+    dates.forEach(function(dstr) {
+      var di = TIER.dpos[dstr];
+      var v = tierVal(c, di);
+      if (v != null && v.s != null) { t += v.s; n++; }
+    });
+    return n ? t / n : null;
+  }
+  function trendSc(c) {
+    var a = tierVal(c, TIER.dpos[dates[0]]), b = tierVal(c, TIER.dpos[lastDi]);
+    return (a && b && a.s != null && b.s != null) ? b.s - a.s : null;
+  }
+  if (sortMode === 'code') codes.sort(function(a,b){ return a < b ? -1 : 1; });
+  else {
+    var f = (sortMode === 'mean') ? meanSc : (sortMode === 'trend') ? trendSc : sc;
+    codes.sort(function(a,b){ return ((f(b) == null ? -99 : f(b)) - (f(a) == null ? -99 : f(a))); });
+  }
+  if (topN > 0) {
+    var byScore = codes.slice().sort(function(a,b){ return (sc(b) == null ? -99 : sc(b)) - (sc(a) == null ? -99 : sc(a)); });
+    var keep = new Set(byScore.slice(0, topN));
+    codes = codes.filter(function(c){ return keep.has(c); });
+  }
+  TIER_ROWS = codes;
+
+  var q = null;
+  if (mode === 'quantile') {
+    var vals = [];
+    codes.forEach(function(c){ dates.forEach(function(d){ var v = tierVal(c, TIER.dpos[d]); if (v) vals.push(v.s); }); });
+    vals.sort(function(a,b){ return a - b; });
+    if (vals.length) q = [0,1,2,3].map(function(i){ return vals[Math.floor((vals.length-1) * [0.2,0.4,0.6,0.8][i])]; });
+  }
+
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  var rowH = codes.length <= 40 ? 18 : (codes.length <= 80 ? 14 : 11);
+  var padL = 150, padR = 60, padT = 8, padB = 24;
+  var H = padT + padB + codes.length * rowH;
+  canvas.style.height = H + 'px';
+  canvas.width = rect.width * dpr; canvas.height = H * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+  var cellW = (W - padL - padR) / dates.length;
+  TIER_GEOM = { padL: padL, padT: padT, cellW: cellW, cellH: rowH, dates: dates };
+
+  for (var i = 0; i < codes.length; i++) {
+    for (var j = 0; j < dates.length; j++) {
+      var v = tierVal(codes[i], TIER.dpos[dates[j]]);
+      if (!v) continue;
+      var res = (mode === 'quantile' && q) ? tierColorQ(v.s, q) : tierColor(v.s);
+      ctx.fillStyle = res[0];
+      ctx.fillRect(padL + j * cellW, padT + i * rowH, Math.ceil(cellW) + 1, rowH - 1);
+    }
+  }
+  // y labels: name + latest rank badge
+  var fsize = Math.max(9, Math.min(12, rowH * 0.8));
+  ctx.textAlign = 'right'; ctx.font = fsize + 'px sans-serif';
+  for (var k = 0; k < codes.length; k++) {
+    var nm = (TIER.names[codes[k]] || codes[k]);
+    if (nm.length > 7) nm = nm.substring(0, 7);
+    ctx.fillStyle = (CUR && CUR.ths_code === codes[k]) ? '#ffd54f' : '#c8cbe0';
+    ctx.fillText(nm, padL - 34, padT + k * rowH + rowH * 0.75);
+    var lv = tierVal(codes[k], TIER.dpos[lastDi]);
+    ctx.fillStyle = '#567'; ctx.font = Math.max(8, fsize - 2) + 'px sans-serif';
+    ctx.fillText(lv ? '#' + lv.r : '—', padL - 2, padT + k * rowH + rowH * 0.75);
+    ctx.font = fsize + 'px sans-serif';
+  }
+  // x labels
+  ctx.textAlign = 'left'; ctx.fillStyle = '#889';
+  var step = Math.max(1, Math.round(dates.length / (W > 1200 ? 24 : 14)));
+  for (var m = 0; m < dates.length; m += step)
+    ctx.fillText(dates[m].substring(2, 4) + '/' + dates[m].substring(4, 6), padL + m * cellW, H - 8);
+  // legend + status
+  var lg = document.getElementById('tierLegend2');
+  lg.innerHTML = '<span>五档:</span>' + [4,3,2,1,0].map(function(i){ return '<i class="swatch" style="background:' + TIER_STYLE[i][0] + '"></i>' + TIER_STYLE[i][2] + ' ' + TIER_STYLE[i][1]; }).join(' ') +
+    '<span style="color:#667;margin-left:12px">黄标行=当前行业 · 点击行→切换</span>';
+  document.getElementById('tierStatus2').textContent = 'SectorScore ' + fmtDate(String(dates[0])) + ' ~ ' + fmtDate(String(dates[dates.length-1])) + ' · ' + codes.length + '行业';
+}
+
+// ═══ single-row tier bar: current industry, aligned with stock axis ═══
+var ROWT_GEOM = null;
+function drawRowTier() {
+  var canvas = document.getElementById('rowTierCanvas');
+  if (!canvas || !CUR || !TIER) return;
+  var rg = parseInt(document.getElementById('rangeSel').value);
+  var stockDates = AXIS.slice(rg > 0 ? Math.max(0, AXIS.length - rg) : 0);
+  var code = CUR.ths_code;
+  var arr = TIER.series[code] || [];
+  // score dates within window (use stock axis as master; missing score dates = gap)
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  var rowH = 20, padL = Math.min(170, Math.max(90, rect.width * 0.11)), padT = 2, padB = 4;
+  var H = padT + padB + rowH;
+  canvas.style.height = H + 'px';
+  canvas.width = rect.width * dpr; canvas.height = H * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width;
+  ctx.fillStyle = '#101020'; ctx.fillRect(0, 0, W, H);
+  var cellW = (W - padL - 10) / stockDates.length;
+  ROWT_GEOM = { padL: padL, cellW: cellW, dates: stockDates, arr: arr };
+  var gray = 0, drawn = 0;
+  for (var j = 0; j < stockDates.length; j++) {
+    var di = TIER.dpos[stockDates[j]];
+    var v = (di === undefined) ? null : tierVal(code, di);
+    if (di === undefined) { ctx.fillStyle = '#1a1a2e'; ctx.fillRect(padL + j * cellW, padT, Math.ceil(cellW) + 1, rowH); gray++; continue; }
+    if (!v) { ctx.fillStyle = '#1a1a2e'; ctx.fillRect(padL + j * cellW, padT, Math.ceil(cellW) + 1, rowH); gray++; continue; }
+    ctx.fillStyle = tierColor(v.s)[0];
+    ctx.fillRect(padL + j * cellW, padT, Math.ceil(cellW) + 1, rowH);
+    drawn++;
+  }
+  ctx.textAlign = 'right'; ctx.font = '11px sans-serif';
+  ctx.fillStyle = '#9fb0d0';
+  var lv = tierVal(code, TIER.dpos[stockDates[stockDates.length - 1]]);
+  ctx.fillText('行业档位' + (lv ? ' #'+lv.r : ''), padL - 6, padT + rowH * 0.72);
+  document.getElementById('rowTierHint').textContent = ' · ' + CUR.industry + ' ' + drawn + '天有评' + (gray ? ' / ' + gray + '天缺评(灰)' : '');
+}
+
 function loadIndustry(code) {
   if (CACHE[code]) { CUR = CACHE[code]; afterLoad(); return; }
   document.getElementById('status').textContent = '加载行业数据...';
@@ -359,6 +563,8 @@ function afterLoad() {
     POS[st.ts_code] = m;
   });
   draw();
+  drawRowTier();
+  drawTierAll();   // refresh yellow highlight of current industry
 }
 
 // ── hover tooltip + click ──
@@ -434,14 +640,66 @@ fetch('stock_heat.json?_=' + Date.now())
   document.body.innerHTML += '<div style="color:#f88;padding:20px">索引加载失败: ' + e + '</div>';
 });
 
+// ═══ tier canvas hover + row click ═══
+(function bindTierHover(){
+  var canvas = document.getElementById('tierCanvas');
+  var tip = document.getElementById('tip');
+  canvas.addEventListener('mousemove', function(e) {
+    if (!TIER_GEOM || !TIER_ROWS) { tip.style.display = 'none'; return; }
+    var rect = canvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    var i = Math.floor((my - TIER_GEOM.padT) / TIER_GEOM.cellH);
+    var j = Math.floor((mx - TIER_GEOM.padL) / TIER_GEOM.cellW);
+    if (i < 0 || i >= TIER_ROWS.length || j < 0 || j >= TIER_GEOM.dates.length) { tip.style.display = 'none'; return; }
+    var code = TIER_ROWS[i], d = TIER_GEOM.dates[j];
+    var v = tierVal(code, TIER.dpos[d]);
+    if (!v) { tip.style.display = 'none'; return; }
+    var res = tierColor(v.s);
+    tip.innerHTML = '<b style="color:#cde">' + (TIER.names[code] || code) + '</b> <span style="color:#679">' + code + '</span><br>' +
+      fmtDate(String(d)) + ' · 档位 <b style="color:' + res[0] + '">' + res[1] + '</b> · 评分 <b>' + v.s.toFixed(3) + '</b> · 排名 <b>#' + v.r + '</b>' +
+      '<br><span style="color:#667">点击行 → 切换下方个股行业</span>';
+    var tx = e.clientX + 14, ty = e.clientY + 14;
+    if (tx + 240 > window.innerWidth) tx = e.clientX - 230;
+    if (ty + 90 > window.innerHeight) ty = e.clientY - 80;
+    tip.style.display = 'block'; tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+  });
+  canvas.addEventListener('mouseleave', function(){ tip.style.display = 'none'; });
+  canvas.addEventListener('click', function(e) {
+    if (!TIER_GEOM || !TIER_ROWS) return;
+    var rect = canvas.getBoundingClientRect();
+    var my = e.clientY - rect.top;
+    var i = Math.floor((my - TIER_GEOM.padT) / TIER_GEOM.cellH);
+    if (i < 0 || i >= TIER_ROWS.length) return;
+    var code = TIER_ROWS[i];
+    var sel = document.getElementById('indSel');
+    if (sel.value !== code) { sel.value = code; location.hash = code; loadIndustry(code); }
+  });
+})();
+
+// ═══ tier data boot (top panel + row bar) ═══
+fetch('stock_heat_tier.json?_=' + Date.now())
+.then(function(r){ return r.json(); })
+.then(function(t) {
+  TIER = t;
+  TIER.dpos = {};
+  t.dates.forEach(function(d, i){ TIER.dpos[d] = i; });
+  drawTierAll();
+  drawRowTier();
+})
+.catch(function(e){ console.log('tier data load failed', e); });
+
+['tierMode2','tierRange2','tierTop2','tierSort2'].forEach(function(id) {
+  document.getElementById(id).addEventListener('change', drawTierAll);
+});
+
 // controls: each change redraws this panel only
 ['metricSel','scaleSel','rangeSel','topSel','sortSel'].forEach(function(id) {
-  document.getElementById(id).addEventListener('change', draw);
+  document.getElementById(id).addEventListener('change', function() { draw(); drawRowTier(); });
 });
+window.addEventListener('resize', function(){ if (CUR) { draw(); drawRowTier(); } if (TIER) drawTierAll(); });
 document.getElementById('metricSel').addEventListener('change', function() {
   document.getElementById('scaleSel').style.display = (this.value === 'pct') ? '' : 'none';
 });
-window.addEventListener('resize', function(){ if (CUR) draw(); });
 </script>
 </body>
 </html>

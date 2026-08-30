@@ -148,17 +148,27 @@ canvas { display:block; width:100%; }
     <label>排序:</label>
     <select id="heatSort">
       <option value="score">按最新评分</option>
-      <option value="alpha">按行业名</option>
+      <option value="mean">按窗口均分</option>
       <option value="trend">按5日变化</option>
-    </select>
+      <option value="alpha">按行业名</option>
+      <option value="code">按881编码</option>
+          </select>
     <label style="margin-left:8px;">显示top:</label>
     <select id="heatTop">
-      <option value="0">全部90</option>
-      <option value="30" selected>Top 30</option>
-      <option value="20">Top 20</option>
-      <option value="10">Top 10</option>
-    </select>
-    <span style="margin-left:8px;color:#889;font-size:10px" id="heatHover">悬停查看详情</span>
+<option value="0">全部90</option>
+<option value="30" selected>Top 30</option>
+<option value="20">Top 20</option>
+<option value="10">Top 10</option>
+</select>
+    <span class="lbl">范围</span>
+    <select id="heatRange" onchange="onRangeChange('heat')">
+<option value="60">60日</option>
+<option value="250" selected>1年</option>
+<option value="500">2年</option>
+<option value="1000">4年</option>
+<option value="0">全部</option>
+</select>
+        <span style="margin-left:8px;color:#889;font-size:10px" id="heatHover">悬停查看详情</span>
   </div>
 </div>
 
@@ -179,6 +189,22 @@ canvas { display:block; width:100%; }
       <option value="20">Top 20</option>
       <option value="10">Top 10</option>
     </select>
+        <span class="lbl">排序</span>
+<select id="tierSort">
+<option value="score">按最新评分</option>
+<option value="mean">按窗口均分</option>
+<option value="trend">按5日变化</option>
+<option value="alpha">按行业名</option>
+<option value="code">按881编码</option>
+</select>
+        <span class="lbl">范围</span>
+        <select id="tierRange" onchange="onRangeChange('tier')">
+          <option value="60">60日</option>
+          <option value="250" selected>1年</option>
+          <option value="500">2年</option>
+          <option value="1000">4年</option>
+          <option value="0">全部</option>
+        </select>
     <span style="margin-left:8px;color:#889;font-size:10px" id="tierHover">悬停查看详情</span>
   </div>
 </div>
@@ -230,6 +256,31 @@ canvas { display:block; width:100%; }
 
 <script>
 var DATA = null;
+var DATA_FULL = null, FULL_LOADING = false;
+function ranksFor(v) {
+  var needFull = (v !== '60' && v !== '250');
+  return (needFull && DATA_FULL) ? DATA_FULL.sector_rankings : DATA.sector_rankings;
+}
+function onRangeChange(which) {
+  var selId = (which === 'tier') ? 'tierRange' : 'heatRange';
+  var v = document.getElementById(selId).value;
+  var draw = (which === 'tier') ? drawTierHeat : drawSectorHeat;
+  var needFull = (v !== '60' && v !== '250');
+  if (!needFull || DATA_FULL) { draw(); return; }
+  if (FULL_LOADING) return;
+  FULL_LOADING = true;
+  var hb = document.getElementById('tierHover') || {};
+  if (hb.textContent !== undefined) hb.textContent = '加载全史数据中...(55MB, 约10秒)';
+  fetch('market_score_ths_full.json?_=' + Date.now())
+    .then(r => r.json()).then(d => {
+      DATA_FULL = d; FULL_LOADING = false;
+      if (hb.textContent !== undefined) hb.textContent = '全史已加载';
+      draw();
+    }).catch(e => {
+      FULL_LOADING = false;
+      if (hb.textContent !== undefined) hb.textContent = '全史加载失败: ' + e;
+    });
+}
 
 var STATE_COLORS = {
   '强上涨': '#e53935', '弱上涨': '#ff8a65', '平衡轮动': '#78909c',
@@ -246,6 +297,9 @@ fetch('market_score_ths.json?_=' + Date.now())
 .then(d => { DATA = d; init(); })
 .catch(e => { document.body.innerHTML += '<div style="color:#f88;padding:20px">加载失败: '+e+'</div>'; });
 
+function drawAllCharts() {
+  drawMarketScore(); drawSectorHeat(); drawTierHeat(); drawRadar(); drawCycle();
+}
 function init() {
   buildDateSelectors();
   drawMarketScore();
@@ -393,6 +447,30 @@ function drawMarketScore() {
 // ═══════════════════════════════════
 // 板块热力图
 // ═══════════════════════════════════
+function orderInds(inds, ranks, dates, mode) {
+  var last = dates[dates.length-1], first = dates[0];
+  var m = {};
+  ranks.forEach(function(r){ m[r.date+'|'+r.industry] = r; });
+  function sc(ind, d){ var r = m[d+'|'+ind]; return r ? r.score : null; }
+  var arr = inds.slice();
+  if (mode === 'alpha') return arr.sort(function(a,b){ return a.localeCompare(b, 'zh'); });
+  if (mode === 'code') return arr.sort(function(a,b){
+    var ra = m[last+'|'+a], rb = m[last+'|'+b];
+    var ca = ra && ra.ths_code ? String(ra.ths_code) : '999999';
+    var cb = rb && rb.ths_code ? String(rb.ths_code) : '999999';
+    return ca === cb ? 0 : (ca < cb ? -1 : 1);
+  });
+  if (mode === 'trend') return arr.sort(function(a,b){
+    function dlt(x){ var v0 = sc(x, first), v1 = sc(x, last); return (v0 != null && v1 != null) ? v1 - v0 : -99; }
+    return dlt(b) - dlt(a);
+  });
+  if (mode === 'mean') {
+    var sums = {};
+    arr.forEach(function(ind){ var t = 0, n = 0; dates.forEach(function(d){ var v = sc(ind, d); if (v != null) { t += v; n++; } }); sums[ind] = n ? t / n : -99; });
+    return arr.sort(function(a,b){ return sums[b] - sums[a]; });
+  }
+  return arr.sort(function(a,b){ return (sc(b, last) || -99) - (sc(a, last) || -99); });
+}
 function drawSectorHeat() {
   var canvas = document.getElementById('sectorHeatCanvas');
   var dpr = window.devicePixelRatio || 1;
@@ -404,8 +482,10 @@ function drawSectorHeat() {
   var W = rect.width, H = rect.height;
   ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
 
-  var ranks = DATA.sector_rankings;
+  var ranks = ranksFor(document.getElementById('heatRange').value);
   var dates = [...new Set(ranks.map(r => r.date))].sort();
+  var rgS = parseInt(document.getElementById('heatRange').value);
+  if (rgS > 0) dates = dates.slice(-rgS);
   var nDates = dates.length;
   var topN = parseInt(document.getElementById('heatTop').value);
   var sortMode = document.getElementById('heatSort').value;
@@ -419,6 +499,7 @@ function drawSectorHeat() {
   } else {
     selectedInds = allInds;
   }
+  selectedInds = orderInds(selectedInds, ranks, dates, document.getElementById('heatSort').value);
   var nInds = selectedInds.length;
 
   var padL = MODAL_ACTIVE ? 170 : 90, padR = 10, padT = 10, padB = 24;
@@ -525,8 +606,10 @@ function drawTierHeat() {
   var W = rect.width, H = rect.height;
   ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
 
-  var ranks = DATA.sector_rankings;
+  var ranks = ranksFor(document.getElementById('tierRange').value);
   var dates = [...new Set(ranks.map(r => r.date))].sort();
+  var rg = parseInt(document.getElementById('tierRange').value);
+  if (rg > 0) dates = dates.slice(-rg);
   var topN = parseInt(document.getElementById('tierTop').value);
   var mode = document.getElementById('tierMode').value;
 
@@ -538,6 +621,7 @@ function drawTierHeat() {
   } else {
     selectedInds = allInds;
   }
+  selectedInds = orderInds(selectedInds, ranks, dates, document.getElementById('tierSort').value);
   var nInds = selectedInds.length;
   var nDates = dates.length;
 
@@ -849,6 +933,7 @@ function bindControls() {
   document.getElementById('heatSort').addEventListener('change', drawSectorHeat);
   document.getElementById('tierMode').addEventListener('change', drawTierHeat);
   document.getElementById('tierTop').addEventListener('change', drawTierHeat);
+  document.getElementById('tierSort').addEventListener('change', drawTierHeat);
   document.getElementById('heatTop').addEventListener('change', drawSectorHeat);
   document.getElementById('radarDate').addEventListener('change', drawRadar);
   document.getElementById('radarPrev').addEventListener('click', function() {
@@ -897,13 +982,16 @@ function bindControls() {
   hc.addEventListener('mousemove', function(e) {
     var rect = hc.getBoundingClientRect();
     var mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    var ranks = DATA.sector_rankings;
+    var ranks = ranksFor(document.getElementById('heatRange').value);
     var dates = [...new Set(ranks.map(r => r.date))].sort();
+  var rg = parseInt(document.getElementById('heatRange').value);
+  if (rg > 0) dates = dates.slice(-rg);
     var topN = parseInt(document.getElementById('heatTop').value);
     var latestData = ranks.filter(r => r.date === dates[dates.length-1]);
     var selectedInds = topN > 0
       ? latestData.sort((a,b)=>b.score-a.score).slice(0,topN).map(r=>r.industry)
       : [...new Set(ranks.map(r=>r.industry))];
+    selectedInds = orderInds(selectedInds, ranks, dates, document.getElementById('heatSort').value);
     var padL = MODAL_ACTIVE ? 170 : 90, padT = 10;
     var cellW = (rect.width - padL - 10) / dates.length;
     var cellH = (rect.height - 10 - 24) / selectedInds.length;

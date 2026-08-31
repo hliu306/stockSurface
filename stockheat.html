@@ -42,6 +42,7 @@ h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0; letter-spacing
 #status { color:#7a9; font-size:11px; margin-left:auto; }
 
 canvas { display:block; width:100%; cursor:crosshair; }
+#rowTierCanvas { cursor:pointer; }
 
 .tooltip { position:fixed; pointer-events:none; background:rgba(10,10,20,0.95);
   border:1px solid #558; border-radius:4px; padding:4px 8px; font-size:11px;
@@ -80,7 +81,7 @@ a { color:#7aa2f7; }
 
 <div style="background:#141a2e;border:1px solid #2a3350;border-radius:8px;padding:10px 16px;margin:10px 0;font-size:12px;color:#9fb0d0;line-height:1.7">
 <b style="color:#e8ecf8">同花顺行业成分 · 个股级</b> · 每行一只股票, 每列一个交易日, 颜色=所选指标 · 色阶全行业统一(同日跨股横向可比)<br>
-<span style="color:#889">已知局限: 成分股来自同花顺游客接口(每行业最多100只, 4673只≈90%A股, 15个大行业被截断); 次新股/停牌日无数据(深色空格); 涨跌幅由 close/pre_close 重算; 换手率缺失日显示空格。点击色块 → 同花顺个股页。URL #881xxx 可直接分享行业视图。</span>
+<span style="color:#889">已知局限: 成分股来自同花顺游客接口(每行业前100只: 全市场真实5403只中已取4673只, 15个大行业被截断——排序按涨幅降序且含北交所股,大行业实际成分见下拉★标注, 如汽车零部件100/268只; 翻页AJAX需登录无法绕过); 次新股/停牌日无数据(深色空格); 涨跌幅由 close/pre_close 重算; 换手率缺失日显示空格。点击色块 → 同花顺个股页。URL #881xxx 可直接分享行业视图。</span>
 </div>
 
 <div class="panel">
@@ -161,7 +162,7 @@ a { color:#7aa2f7; }
     <span id="status"></span>
   </div>
   <div style="border:1px dashed #345;border-radius:6px;padding:4px 6px;margin-bottom:6px;background:rgba(30,30,55,0.35)">
-    <div style="font-size:10px;color:#89a;margin-bottom:2px">本行业评分档位（与下方个股同一时间轴 · 灰点=缺评）<span id="rowTierHint"></span></div>
+    <div style="font-size:10px;color:#89a;margin-bottom:2px">本行业评分档位（与下方个股同一时间轴 · 灰点=缺评 · 点击本栏→同花顺行业指数页）<span id="rowTierHint"></span></div>
     <canvas id="rowTierCanvas"></canvas>
   </div>
   <canvas id="stockCanvas"></canvas>
@@ -395,7 +396,9 @@ function draw() {
     CUR.industry + ' ' + CUR.ths_code + ' · 显示' + rows.length + '/' + CUR.stocks.length + '只 · ' +
     fmtDate(String(dLast)) + ' 上涨' + (tot ? Math.round(up / tot * 100) : '-') + '% 中位' +
     (med.length ? (med[Math.floor(med.length/2)] >= 0 ? '+' : '') + med[Math.floor(med.length/2)].toFixed(2) + '%' : '-');
-  document.getElementById('indTitle').textContent = '— ' + CUR.industry + '(' + CUR.ths_code + ')';
+  document.getElementById('indTitle').textContent = '— ' + CUR.industry + '(' + CUR.ths_code + ')' +
+    (function(){ var m = (IDX.industries||[]).filter(function(x){ return String(x.ths_code) === String(CUR.ths_code); })[0];
+      return (m && m.n_true && m.n_true > m.n_stocks) ? ' ★成分截断: 显示' + m.n_stocks + '/' + m.n_true + '只(游客接口上限100)' : ''; })();
 }
 
 // ═══ top panel: 90-industry tier heatmap (independent controls) ═══
@@ -538,7 +541,7 @@ function drawRowTier() {
   ctx.textAlign = 'right'; ctx.font = '11px sans-serif';
   ctx.fillStyle = '#9fb0d0';
   var lv = tierVal(code, TIER.dpos[stockDates[stockDates.length - 1]]);
-  ctx.fillText('行业档位' + (lv ? ' #'+lv.r : ''), padL - 6, padT + rowH * 0.72);
+  ctx.fillText('行业档位' + (lv ? ' #'+lv.r : '') + ' ↗', padL - 6, padT + rowH * 0.72);
   document.getElementById('rowTierHint').textContent = ' · ' + CUR.industry + ' ' + drawn + '天有评' + (gray ? ' / ' + gray + '天缺评(灰)' : '');
 }
 
@@ -620,7 +623,7 @@ fetch('stock_heat.json?_=' + Date.now())
   byCode.forEach(function(it) {
     var o = document.createElement('option');
     o.value = it.ths_code;
-    o.textContent = it.ths_code + ' ' + it.industry + ' (' + it.n_stocks + '只)';
+    o.textContent = it.ths_code + ' ' + it.industry + ' (' + it.n_stocks + (it.n_true && it.n_true > it.n_stocks ? '/' + it.n_true : '') + '只' + (it.n_true && it.n_true > it.n_stocks ? '★' : '') + ')';
     sel.appendChild(o);
   });
   sel.addEventListener('change', function() {
@@ -673,6 +676,15 @@ fetch('stock_heat.json?_=' + Date.now())
     var code = TIER_ROWS[i];
     var sel = document.getElementById('indSel');
     if (sel.value !== code) { sel.value = code; location.hash = code; loadIndustry(code); }
+  });
+})();
+
+// row tier bar: click -> THS industry index page
+(function bindRowTierLink(){
+  var canvas = document.getElementById('rowTierCanvas');
+  canvas.addEventListener('click', function() {
+    if (CUR && CUR.ths_code)
+      window.open('http://q.10jqka.com.cn/thshy/detail/code/' + CUR.ths_code + '/', '_blank');
   });
 })();
 

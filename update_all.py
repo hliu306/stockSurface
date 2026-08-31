@@ -6,10 +6,6 @@ stockSurface 全量增量更新管道
 3. 更新 cache → data.json → market_score.json → liquidity.json → market_states.json
 4. 自动跳过非交易日和已有数据
 """
-from pathlib import Path
-import os
-BASE_DIR = str(Path(__file__).resolve().parent)
-
 import pandas as pd
 import numpy as np
 import tushare as ts
@@ -17,7 +13,7 @@ import akshare as ak
 import json, os, sys, time, re, datetime, warnings
 warnings.filterwarnings('ignore')
 
-BASE = BASE_DIR
+BASE = '/mnt/e/stockSurface'
 CACHE = os.path.join(BASE, 'cache_td_v2.parquet')
 SI = os.path.join(BASE, 'stock_industry.parquet')
 TRADE_DAYS = os.path.join(BASE, 'trade_days.json')
@@ -44,7 +40,7 @@ def get_missing_dates():
     """返回cache中缺失的交易日列表"""
     df = pd.read_parquet(CACHE, columns=['trade_date'])
     cache_dates = set(df['trade_date'].unique())
-    cache_max = max(cache_dates)
+    cache_max = int(max(cache_dates))  # int32 -> int, avoid numpy/str ufunc crash
     log(f"Cache最新: {cache_max}, 共{len(cache_dates)}交易日")
 
     # 用tushare直接查最新交易日（比本地trade_days.json可靠）
@@ -63,7 +59,7 @@ def get_missing_dates():
     # 验证哪些是有效交易日（有数据返回）
     missing = []
     for d in check_dates:
-        if d <= cache_max:
+        if int(d) <= cache_max:
             continue  # 已有
         try:
             df_test = pro.daily(trade_date=d)

@@ -246,16 +246,17 @@ function renderWall(){
 
 function renderManifold(){
   const cv = document.getElementById('mfcanvas');
-  // 自适应正方形: 边长=可用宽度(最长边), 上限1200防过高; 内部绘图框强制宽=高
-  const S = Math.min(Math.max(cv.parentElement.parentElement.clientWidth - 48, 320), 1200);
-  const W = S, H = S;
+  // 底图满铺: 宽=可用宽度全吃, 高=正方形边长(≤1200); 正方形绘图框居中
+  const avail = Math.max(cv.parentElement.parentElement.clientWidth - 48, 320);
+  const S = Math.min(avail, 1200);
+  const W = avail, H = S;
   cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio;
   cv.style.width = W+'px'; cv.style.height = H+'px';
   const ctx = cv.getContext('2d'); ctx.scale(devicePixelRatio,devicePixelRatio);
   ctx.clearRect(0,0,W,H);
   const ML=64, MR=16, MT=16, MB=36;
   const PW = Math.min(W-ML-MR, H-MT-MB);          // 绘图框边长(正方形保证)
-  const L=ML, T=MT, R=L+PW, B=T+PW;
+  const L=Math.round((W-PW)/2), T=MT, R=L+PW, B=T+PW;
   const xs = DATA.flow.map(f=>f.x), ys = DATA.flow.map(f=>f.y);
   // 离群值温和压缩: 各轴按2%分位截断, 点保持在框内
   const q = (arr,p)=>arr.slice().sort((a,b)=>a-b)[Math.floor(p*(arr.length-1))];
@@ -282,7 +283,11 @@ function renderManifold(){
     ctx.fillStyle = chgColor(f.x);
     ctx.beginPath(); ctx.arc(x,y,4.5,0,7); ctx.fill();
     ctx.fillStyle='#e6edf3'; ctx.font='11px sans-serif'; ctx.textAlign='left';
-    ctx.fillText(f.name, x+7, y+3.5);
+    // 靠右的点: 标签翻到点左侧绘制, 防裁切
+    const w = ctx.measureText(f.name).width;
+    if (x + 7 + w > W - 4){
+      ctx.textAlign='right'; ctx.fillText(f.name, x-7, y+3.5);
+    } else ctx.fillText(f.name, x+7, y+3.5);
   });
 }
 let MFHIT = [];

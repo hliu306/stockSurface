@@ -148,6 +148,22 @@ def main():
                          x0=round(float(m20_5ago), 4),
                          y=n['roll'] if n['roll'] is not None else 0.0))
 
+    # ---- 日历对齐历史序列(下钻面板用): calendar + 每品种 c/o/v 三序列 ----
+    all_dates = sorted({d for df in px_cache.values()
+                        for d in df['日期'].astype(str).tolist()})
+    for n in nodes:
+        df = px_cache[n['var']]
+        d2i = {d: i for i, d in enumerate(all_dates)}
+        c = [None] * len(all_dates)
+        o = [None] * len(all_dates)
+        v = [None] * len(all_dates)
+        for _, row in df.iterrows():
+            i = d2i[str(row['日期'])]
+            c[i] = round(float(row['收盘价']), 2)
+            o[i] = int(float(row['持仓量']))
+            v[i] = int(float(row['成交量']))
+        n['hist'] = dict(c=c, o=o, v=v)
+
     # ---- 全市场截面统计(配色标尺用) ----
     chgs = [n['chg1'] for n in nodes]
     chains_list = []
@@ -157,6 +173,7 @@ def main():
     out = dict(
         updated=TODAY,
         updated_at=pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'),
+        calendar=all_dates,
         chains=CHAINS_OUT, chains_list=chains_list, nodes=nodes, flow=flow,
         stats=dict(n=len(nodes), fail=daily_fail),
     )

@@ -19,18 +19,18 @@
   .stage-badge:hover { border-color:#58a6ff; }
   .stage-badge.active { outline:2px solid #58a6ff; outline-offset:1px; }
   /* ─── L1 拓扑 ─── */
-  #chains { display:grid; grid-template-columns:repeat(auto-fit,minmax(430px,1fr)); gap:14px; }
-  .chain { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:12px 12px 10px; }
-  .chain h3 { font-size:14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:baseline; }
-  .chain h3 .ccnt { color:#8b949e; font-size:11px; font-weight:400; }
-  .stage-row { display:flex; align-items:flex-end; gap:6px; margin-bottom:4px; min-height:86px; }
-  .stage-label { writing-mode:vertical-lr; transform:rotate(180deg); font-size:10px; color:#6e7681; letter-spacing:2px; padding:4px 1px; }
-  .node { flex:1; min-width:0; border-radius:7px; padding:6px 5px 5px; text-align:center; cursor:pointer; border:1.5px solid rgba(255,255,255,.12); position:relative; transition:transform .1s; }
+  #chains { display:grid; grid-template-columns:1fr; gap:16px; }
+  .chain { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px 16px 12px; }
+  .chain h3 { font-size:16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:baseline; }
+  .chain h3 .ccnt { color:#8b949e; font-size:12px; font-weight:400; }
+  .stage-row { display:flex; align-items:flex-end; gap:8px; margin-bottom:4px; min-height:130px; }
+  .stage-label { writing-mode:vertical-lr; transform:rotate(180deg); font-size:11px; color:#6e7681; letter-spacing:2px; padding:4px 2px; }
+  .node { flex:1; min-width:0; border-radius:8px; padding:9px 6px 7px; text-align:center; cursor:pointer; border:1.5px solid rgba(255,255,255,.12); position:relative; transition:transform .1s; }
   .node:hover { transform:translateY(-2px); z-index:5; }
-  .node .nm { font-weight:700; font-size:13px; text-shadow:0 1px 3px rgba(0,0,0,.8); white-space:nowrap; }
-  .node .px { font-size:10px; opacity:.85; }
-  .node .ch { font-size:12px; font-weight:700; }
-  .node .oi { font-size:9px; opacity:.7; }
+  .node .nm { font-weight:700; font-size:16px; text-shadow:0 1px 3px rgba(0,0,0,.8); white-space:nowrap; }
+  .node .px { font-size:11px; opacity:.85; }
+  .node .ch { font-size:15px; font-weight:700; }
+  .node .oi { font-size:10px; opacity:.7; }
   .node .curvebar { position:absolute; left:0; bottom:0; height:3px; border-radius:0 0 6px 6px; }
   .size-tag { position:absolute; top:-7px; right:-4px; background:#21262d; border:1px solid #30363d; border-radius:8px; font-size:9px; padding:0 5px; color:#8b949e; }
   /* ─── tooltip ─── */
@@ -168,7 +168,7 @@ function renderChains(){
       if(!grp.length) return;
       const lab = document.createElement('div'); lab.className='stage-label'; lab.textContent=labels[si]; row.appendChild(lab);
       grp.forEach(n=>{
-        const h = 46 + 40*Math.sqrt(n.oi/maxOI);
+        const h = 58 + 56*Math.sqrt(n.oi/maxOI);
         const d = document.createElement('div'); d.className='node'; d.style.height=h+'px';
         d.style.background = chgColor(n[COLOR_MODES[colorMode].key]);
         const oiBarW = Math.max(-1,Math.min(1,n.oi5))*50;

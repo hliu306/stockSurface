@@ -55,19 +55,10 @@
   .tcell .tnm .r { font-weight:400; font-size:10px; }
   .tcell svg { display:block; margin-top:3px; }
   .pos { color:#f85149; } .neg { color:#3fb950; } .flat { color:#8b949e; }
-  /* ─── L3 流形(芯片版) ─── */
+  /* ─── L3 流形(正方形画布) ─── */
   #manifold { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:12px; }
-  #mfgrid { position:relative; height:520px; background:#0d1117; border:1px solid #21262d; border-radius:8px; overflow:hidden; }
-  #mfgrid::before { content:''; position:absolute; left:50%; top:0; bottom:0; width:1px; background:#30363d; }
-  #mfgrid::after { content:''; position:absolute; top:50%; left:0; right:0; height:1px; background:#30363d; }
-  .mfquad { position:absolute; width:50%; height:50%; display:flex; align-items:flex-start; justify-content:flex-end; padding:8px 12px; font-size:11px; color:#484f58; font-weight:600; pointer-events:none; letter-spacing:1px; }
-  .mfchip { position:absolute; transform:translate(-50%,-50%); border-radius:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.14); cursor:pointer; display:flex; flex-direction:column; align-items:center; line-height:1.25; transition:transform .1s; white-space:nowrap; }
-  .mfchip:hover { transform:translate(-50%,-50%) scale(1.18); z-index:5; border-color:#58a6ff; }
-  .mfchip .n { font-weight:700; font-size:13px; text-shadow:0 1px 3px rgba(0,0,0,.8); }
-  .mfchip .r { font-size:10px; opacity:.85; font-variant-numeric:tabular-nums; }
-  .mfxlab { position:absolute; bottom:4px; left:0; right:0; display:flex; justify-content:space-between; padding:0 12px; font-size:11px; color:#6e7681; pointer-events:none; }
-  .mfxlab b { color:#8b949e; }
-  .mfylab { position:absolute; top:4px; left:0; right:0; display:flex; justify-content:space-between; padding:0 12px; font-size:10px; color:#484f58; pointer-events:none; }
+  #mfwrap { display:flex; justify-content:center; }
+  #mfcanvas { background:#0d1117; border:1px solid #21262d; border-radius:8px; }
   /* ─── 明细表 ─── */
   #detail { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:0; overflow:hidden; }
   #detail table { width:100%; border-collapse:collapse; font-size:12px; }
@@ -151,8 +142,8 @@ function applyLayout(){
 
 <div id="manifold">
   <h2>状态流形 · L3 — 20日动量 × 展期收益</h2>
-  <div class="hint">芯片色=20日动量强度；横=趋势，纵=期限结构（顶部=库存压力 contango，底部=现货紧 back）。点芯片下钻</div>
-  <div id="mfgrid"></div>
+  <div class="hint">X=20日动量，Y=年化展期收益(back为正)；箭头=5日位移。右上=趋势强+现货紧，左下=趋势弱+库存压力。点品种下钻</div>
+  <div id="mfwrap"><canvas id="mfcanvas"></canvas></div>
 </div>
 
 <div id="detail">
@@ -254,68 +245,56 @@ function renderWall(){
 }
 
 function renderManifold(){
-  // 方块芯片版: x=20日动量(截断±20%), y=年化展期(截断±60%,平方根压缩), 网格吸附防重叠
-  const host = document.getElementById('mfgrid');
-  host.innerHTML = '';
-  const clamp = (v, lim) => Math.max(-lim, Math.min(lim, v));
-  // y 用符号平方根压缩: 保留极值方向, 压缩尾部
-  const yv = f => { const r = f.y==null?0:f.y, s = Math.sign(r)*Math.sqrt(Math.abs(r)/0.60); return clamp(s, 1); };
-  // 网格: 20列 x 12行, 同格冲突向邻格溢出
-  const NCOL=22, NROW=13;
-  const cells = {};
-  const items = DATA.flow.map(f => {
-    const cx = clamp((f.x/0.20 + 1)/2, 0, 0.999);       // 0..1
-    const cy = clamp((1 - (yv(f)+1)/2), 0, 0.999);      // 0..1 (top=0)
-    return { f, cx, cy };
-  });
-  const taken = new Set();
-  items.forEach(it => {
-    let col = Math.floor(it.cx*NCOL), row = Math.floor(it.cy*NROW);
-    // 冲突: 螺旋找最近空格
-    if (taken.has(col+','+row)){
-      outer: for (let rr=1; rr<Math.max(NCOL,NROW); rr++){
-        for (let dc=-rr; dc<=rr; dc++) for (let dr=-rr; dr<=rr; dr++){
-          if (Math.max(Math.abs(dc),Math.abs(dr))!==rr) continue;
-          const c2=col+dc, r2=row+dr;
-          if (c2<0||c2>=NCOL||r2<0||r2>=NROW) continue;
-          if (!taken.has(c2+','+r2)){ col=c2; row=r2; break outer; }
-        }
-      }
-    }
-    taken.add(col+','+row);
-    it.col=col; it.row=row;
-  });
-  // 象限背景
-  const quads = [
-    {t:'趋势强 + 现货紧', x:1, y:1}, {t:'趋势强 + 库存压力', x:1, y:0},
-    {t:'趋势弱 + 现货紧', x:0, y:1}, {t:'趋势弱 + 库存压力', x:0, y:0},
-  ];
-  quads.forEach(q=>{
-    const d = document.createElement('div'); d.className='mfquad';
-    d.style.left = (q.x*50)+'%'; d.style.top = (q.y*50)+'%';
-    d.textContent = q.t;
-    host.appendChild(d);
-  });
-  // 坐标轴标签
-  const ax = document.createElement('div'); ax.className='mfxlab';
-  ax.innerHTML = '<span>← 弱</span><b>20日动量</b><span>强 →</span>';
-  host.appendChild(ax);
-  const ay = document.createElement('div'); ay.className='mfylab';
-  ay.innerHTML = '<span>↑ 库存压力(contango)</span><span>现货紧(back) ↓</span>';
-  host.appendChild(ay);
-  // 芯片
-  items.forEach(it => {
-    const n = DATA.nodes.find(n=>n.var===it.f.var);
-    const chip = document.createElement('div'); chip.className='mfchip';
-    chip.style.left = ((it.col+0.5)/NCOL*100)+'%';
-    chip.style.top = ((it.row+0.5)/NROW*100)+'%';
-    chip.style.background = chgColor(it.f.x);
-    chip.innerHTML = `<span class="n">${it.f.name}</span><span class="r">${it.f.x>=0?'+':''}${(it.f.x*100).toFixed(0)}%</span>`;
-    chip.title = `${it.f.name} · 20日${(it.f.x*100).toFixed(1)}% · 展期${it.f.y==null?'—':(it.f.y*100).toFixed(0)+'%'}`;
-    if(n) chip.onclick = ()=>openModal(n);
-    host.appendChild(chip);
+  const cv = document.getElementById('mfcanvas');
+  // 正方形画布: 边长=min(可用宽, 560), 不随宽屏拉伸
+  const S = Math.min(Math.max(cv.parentElement.parentElement.clientWidth - 60, 320), 560);
+  const W = S, H = S;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio;
+  cv.style.width = W+'px'; cv.style.height = H+'px';
+  const ctx = cv.getContext('2d'); ctx.scale(devicePixelRatio,devicePixelRatio);
+  ctx.clearRect(0,0,W,H);
+  const L=64,R=W-16,T=16,B=H-36;
+  const xs = DATA.flow.map(f=>f.x), ys = DATA.flow.map(f=>f.y);
+  // 离群值温和压缩: 各轴按2%分位截断, 点保持在框内
+  const q = (arr,p)=>arr.slice().sort((a,b)=>a-b)[Math.floor(p*(arr.length-1))];
+  const x0=Math.min(q(xs,.02),-0.05), x1=Math.max(q(xs,.98),0.05);
+  const y0=Math.min(q(ys,.02),-0.02), y1=Math.max(q(ys,.98),0.02);
+  const X=v=>L+(Math.max(x0,Math.min(x1,v))-x0)/(x1-x0)*(R-L);
+  const Y=v=>B-(Math.max(y0,Math.min(y1,v))-y0)/(y1-y0)*(B-T);
+  MFHIT = [];   // 命中检测缓存
+  // grid + axes
+  ctx.strokeStyle='#21262d'; ctx.fillStyle='#6e7681'; ctx.font='10px sans-serif';
+  for(const gv of [0]){ ctx.beginPath();ctx.moveTo(X(gv),T);ctx.lineTo(X(gv),B);ctx.stroke(); ctx.beginPath();ctx.moveTo(L,Y(gv));ctx.lineTo(R,Y(gv));ctx.stroke(); }
+  ctx.textAlign='center'; ctx.fillText('20日动量 →', (L+R)/2, H-6);
+  ctx.save(); ctx.translate(12,(T+B)/2); ctx.rotate(-Math.PI/2); ctx.fillText('年化展期收益(back+) →', 0, 0); ctx.restore();
+  // 刻度
+  ctx.textAlign='right';
+  ctx.fillText((x1*100).toFixed(0)+'%', X(Math.min(x1,1))-2, B+12); ctx.textAlign='left';
+  ctx.fillText((x0*100).toFixed(0)+'%', X(0)+4, B+12);
+  // arrows + dots
+  DATA.flow.forEach(f=>{
+    const x=X(f.x), y=Y(f.y), x0p=X(f.x0), y0p=y;
+    MFHIT.push({x, y, var:f.var});
+    const dx=x-x0p;
+    if (Math.abs(dx)>6){ ctx.strokeStyle='rgba(210,168,255,.5)'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(x0p,y0p); ctx.lineTo(x,y); ctx.stroke(); }
+    ctx.fillStyle = chgColor(f.x);
+    ctx.beginPath(); ctx.arc(x,y,4.5,0,7); ctx.fill();
+    ctx.fillStyle='#e6edf3'; ctx.font='11px sans-serif'; ctx.textAlign='left';
+    ctx.fillText(f.name, x+7, y+3.5);
   });
 }
+let MFHIT = [];
+document.getElementById('mfcanvas').addEventListener('click', e=>{
+  const r = e.target.getBoundingClientRect();
+  const px = (e.clientX-r.left), py = (e.clientY-r.top);
+  let best=null, bd=1e9;
+  for(const h of MFHIT){ const d=(h.x-px)**2+(h.y-py)**2; if(d<bd){bd=d;best=h;} }
+  if(best && bd < 12*12){
+    const n = DATA.nodes.find(n=>n.var===best.var);
+    if(n) openModal(n);
+  }
+});
+document.getElementById('mfcanvas').style.cursor = 'pointer';
 
 function renderTable(){
   const rows = [...DATA.nodes].sort((a,b)=>b.m20-a.m20);

@@ -75,7 +75,7 @@
 
 <div id="termwall">
   <h2>期限结构墙 · L2</h2>
-  <div class="hint">每品种远期曲线（近月→远月，白点=主力）｜右上角数字=年化展期收益（正=contango 近低远高，负=back）</div>
+  <div class="hint">每品种远期曲线（近月→远月，白点=主力）｜右上角数字=年化展期收益（正=back 近高远低·现货紧，负=contango·库存压力）</div>
   <div class="wallgrid" id="wall"></div>
 </div>
 
@@ -242,7 +242,7 @@ document.addEventListener('click', e=>{ if(!e.target.closest('.node,.tcell')) do
 // color mode switch: click legend badges
 document.querySelectorAll('.legend .stage-badge').forEach((b,i)=>b.onclick=()=>{ colorMode=i; renderChains(); });
 
-fetch('futpan.json').then(r=>r.json()).then(d=>{
+fetch('futpan/futpan.json').then(r=>r.json()).then(d=>{
   DATA = d;
   document.getElementById('sub').innerHTML = `更新于 <b>${d.updated_at}</b> · ${d.stats.n} 品种 · 数据源: 新浪期货(主力连续+全合约) ${d.stats.fail&&d.stats.fail.length?'<span class="updated-stale">缺失:'+d.stats.fail.join(',')+'</span>':''}`;
   renderChains(); renderWall(); renderManifold(); renderTable();

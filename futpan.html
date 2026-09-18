@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>期货全局 · 产业链拓扑</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d1117; color:#e6edf3; font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif; padding:16px; }
+  h1 { font-size:20px; margin-bottom:2px; }
+  .sub { color:#8b949e; font-size:12px; margin-bottom:14px; }
+  .sub b { color:#58a6ff; }
+  .legend { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:14px; font-size:12px; color:#8b949e; }
+  .lg-item { display:flex; gap:5px; align-items:center; }
+  .sw { width:14px; height:14px; border-radius:3px; }
+  .stage-badge { padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+  /* ─── L1 拓扑 ─── */
+  #chains { display:grid; grid-template-columns:repeat(auto-fit,minmax(430px,1fr)); gap:14px; }
+  .chain { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:12px 12px 10px; }
+  .chain h3 { font-size:14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:baseline; }
+  .chain h3 .ccnt { color:#8b949e; font-size:11px; font-weight:400; }
+  .stage-row { display:flex; align-items:flex-end; gap:6px; margin-bottom:4px; min-height:86px; }
+  .stage-label { writing-mode:vertical-lr; transform:rotate(180deg); font-size:10px; color:#6e7681; letter-spacing:2px; padding:4px 1px; }
+  .node { flex:1; min-width:0; border-radius:7px; padding:6px 5px 5px; text-align:center; cursor:pointer; border:1.5px solid rgba(255,255,255,.12); position:relative; transition:transform .1s; }
+  .node:hover { transform:translateY(-2px); z-index:5; }
+  .node .nm { font-weight:700; font-size:13px; text-shadow:0 1px 3px rgba(0,0,0,.8); white-space:nowrap; }
+  .node .px { font-size:10px; opacity:.85; }
+  .node .ch { font-size:12px; font-weight:700; }
+  .node .oi { font-size:9px; opacity:.7; }
+  .node .curvebar { position:absolute; left:0; bottom:0; height:3px; border-radius:0 0 6px 6px; }
+  .size-tag { position:absolute; top:-7px; right:-4px; background:#21262d; border:1px solid #30363d; border-radius:8px; font-size:9px; padding:0 5px; color:#8b949e; }
+  /* ─── tooltip ─── */
+  #tip { position:fixed; pointer-events:none; background:#1c2128; border:1px solid #444c56; border-radius:8px; padding:10px 12px; font-size:12px; z-index:99; display:none; box-shadow:0 8px 24px rgba(0,0,0,.5); max-width:340px; }
+  #tip h4 { font-size:13px; margin-bottom:6px; }
+  #tip table { border-collapse:collapse; }
+  #tip td { padding:1px 8px 1px 0; color:#adbac7; }
+  #tip td.v { color:#e6edf3; text-align:right; font-variant-numeric:tabular-nums; }
+  /* ─── L2 期限墙 ─── */
+  #termwall { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:12px; }
+  #termwall h2, #manifold h2 { font-size:15px; margin-bottom:4px; }
+  .hint { color:#8b949e; font-size:11px; margin-bottom:10px; }
+  .wallgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+  .tcell { background:#0d1117; border:1px solid #21262d; border-radius:6px; padding:6px 6px 4px; cursor:pointer; }
+  .tcell:hover { border-color:#58a6ff; }
+  .tcell .tnm { font-size:12px; font-weight:600; display:flex; justify-content:space-between; }
+  .tcell .tnm .r { font-weight:400; font-size:10px; }
+  .tcell svg { display:block; margin-top:3px; }
+  .pos { color:#f85149; } .neg { color:#3fb950; } .flat { color:#8b949e; }
+  /* ─── L3 流形 ─── */
+  #manifold { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:12px; }
+  /* ─── 明细表 ─── */
+  #detail { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:0; overflow:hidden; }
+  #detail table { width:100%; border-collapse:collapse; font-size:12px; }
+  #detail th { position:sticky; top:0; background:#21262d; padding:7px 10px; text-align:right; cursor:pointer; user-select:none; white-space:nowrap; }
+  #detail th:first-child, #detail td:first-child { text-align:left; padding-left:14px; }
+  #detail td { padding:5px 10px; text-align:right; border-top:1px solid #21262d; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #detail tr:hover td { background:#1c2128; }
+  .bar { display:inline-block; height:10px; vertical-align:middle; border-radius:2px; margin-left:6px; }
+  .updated-stale { color:#d29922 !important; }
+</style>
+</head>
+<body>
+<h1>期货全局 · 产业链拓扑</h1>
+<div class="sub" id="sub">加载中…</div>
+
+<div class="legend">
+  <span class="lg-item"><span class="sw" id="sw-up" style="background:#f85149"></span>涨</span>
+  <span class="lg-item"><span class="sw" id="sw-dn" style="background:#3fb950"></span>跌</span>
+  <span class="lg-item" style="margin-left:8px">色=涨跌幅，点开切换：</span>
+  <span class="lg-item"><span class="stage-badge" style="background:#1f6feb33;color:#79c0ff">1日</span><span class="stage-badge" style="background:#23863533;color:#7ee787">5日</span><span class="stage-badge" style="background:#8957e533;color:#d2a8ff">20日</span><span class="stage-badge" style="background:#bf870033;color:#e3b341">60日</span></span>
+  <span class="lg-item" style="margin-left:8px">块高=持仓量，底条=5日持仓变化</span>
+</div>
+
+<div id="chains"></div>
+
+<div id="termwall">
+  <h2>期限结构墙 · L2</h2>
+  <div class="hint">每品种远期曲线（近月→远月，白点=主力）｜右上角数字=年化展期收益（正=contango 近低远高，负=back）</div>
+  <div class="wallgrid" id="wall"></div>
+</div>
+
+<div id="manifold">
+  <h2>状态流形 · L3 — 20日动量 × 展期收益</h2>
+  <div class="hint">X=20日动量，Y=年化展期收益(back为正)；箭头=5日位移。右上=趋势强+现货紧，左下=趋势弱+库存压力</div>
+  <canvas id="mfcanvas" height="430"></canvas>
+</div>
+
+<div id="detail">
+  <table id="dtable"></table>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const COLOR_MODES = [
+  {key:'chg1', label:'1日', fmt:v=>(v*100).toFixed(2)+'%'},
+  {key:'m5',   label:'5日', fmt:v=>(v*100).toFixed(1)+'%'},
+  {key:'m20',  label:'20日', fmt:v=>(v*100).toFixed(1)+'%'},
+  {key:'m60',  label:'60日', fmt:v=>(v*100).toFixed(1)+'%'},
+];
+let colorMode = 0;
+let DATA = null;
+
+function chgColor(v){
+  // 期货: 红=涨 绿=跌 (国内习惯)
+  if (v > 0.0001) { const t=Math.min(v/0.03,1); return `rgba(${Math.round(120+115*t)},${Math.round(70-40*t)},${Math.round(70-40*t)},${0.55+0.4*t})`; }
+  if (v < -0.0001) { const t=Math.min(-v/0.03,1); return `rgba(${Math.round(70-40*t)},${Math.round(120+30*t)},${Math.round(70+80*t)},${0.55+0.4*t})`; }
+  return 'rgba(90,95,100,.6)';
+}
+function fmtOI(oi){ return oi>=1e4 ? (oi/1e4).toFixed(oi>=1e5?0:1)+'万' : String(Math.round(oi)); }
+
+function renderChains(){
+  const host = document.getElementById('chains');
+  host.innerHTML = '';
+  const maxOI = Math.max(...DATA.nodes.map(n=>n.oi));
+  for (const [chain, members] of DATA.chains_list){
+    const div = document.createElement('div'); div.className='chain';
+    const up = members.filter(m=>m.chg1>0).length;
+    div.innerHTML = `<h3>${chain} <span class="ccnt">${up}/${members.length} 上涨</span></h3>`;
+    const byStage = [0,1,2].map(s=>members.filter(m=>m.stage===s));
+    const row = document.createElement('div'); row.className='stage-row';
+    const labels = ['原料','中游','下游'];
+    byStage.forEach((grp,si)=>{
+      if(!grp.length) return;
+      const lab = document.createElement('div'); lab.className='stage-label'; lab.textContent=labels[si]; row.appendChild(lab);
+      grp.forEach(n=>{
+        const h = 46 + 40*Math.sqrt(n.oi/maxOI);
+        const d = document.createElement('div'); d.className='node'; d.style.height=h+'px';
+        d.style.background = chgColor(n[COLOR_MODES[colorMode].key]);
+        const oiBarW = Math.max(-1,Math.min(1,n.oi5))*50;
+        d.innerHTML = `<div class="nm">${n.name}</div><div class="px">${n.px}</div>
+          <div class="ch">${(n.chg1*100).toFixed(2)}%</div><div class="oi">${fmtOI(n.oi)}手</div>
+          <div class="curvebar" style="width:${Math.abs(oiBarW)}%;${n.oi5>=0?'left:0;background:#f0c674;':'right:0;background:#4aa3df;'}"></div>`;
+        d.onclick = ()=>showTip(n, d);
+        row.appendChild(d);
+      });
+    });
+    div.appendChild(row); host.appendChild(div);
+  }
+}
+
+function renderWall(){
+  const host = document.getElementById('wall');
+  host.innerHTML = '';
+  DATA.nodes.forEach(n=>{
+    const c = document.createElement('div'); c.className='tcell';
+    const rollCls = n.roll==null?'flat':(n.roll>0?'pos':'neg');
+    const rollTxt = n.roll==null?'—':((n.roll*100).toFixed(1)+'%');
+    const W=138,H=52;
+    let svg = `<svg width="${W}" height="${H}">`;
+    if (n.curve.length){
+      const pxs = n.curve.map(t=>t.px), mn=Math.min(...pxs), mx=Math.max(...pxs);
+      const span = (mx-mn)||1;
+      const mainM = n.curve.reduce((a,b)=>a.oi>b.oi?a:b).m;
+      const pts = n.curve.map((t,i)=>{
+        const x = 8 + i*(W-16)/Math.max(n.curve.length-1,1);
+        const y = H-10-(t.px-mn)/span*(H-22);
+        return {x,y,t};
+      });
+      svg += `<polyline fill="none" stroke="#58a6ff" stroke-width="1.5" points="${pts.map(p=>p.x+','+p.y).join(' ')}"/>`;
+      pts.forEach(p=>{
+        const isMain = p.t.m===mainM;
+        svg += `<circle cx="${p.x}" cy="${p.y}" r="${isMain?3.5:2.2}" fill="${isMain?'#fff':'#8b949e'}"${isMain?' stroke="#58a6ff" stroke-width="1"':''}/>`;
+      });
+    }
+    svg += '</svg>';
+    c.innerHTML = `<div class="tnm"><span>${n.name}</span><span class="r ${rollCls}">${rollTxt}</span></div>${svg}`;
+    c.onclick = ()=>showTip(n, c);
+    host.appendChild(c);
+  });
+}
+
+function renderManifold(){
+  const cv = document.getElementById('mfcanvas');
+  const W = Math.min(cv.parentElement.clientWidth-24, 1280), H = 430;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio;
+  cv.style.width = W+'px'; cv.style.height = H+'px';
+  const ctx = cv.getContext('2d'); ctx.scale(devicePixelRatio,devicePixelRatio);
+  ctx.clearRect(0,0,W,H);
+  const L=64,R=W-16,T=16,B=H-36;
+  const xs = DATA.flow.map(f=>f.x), ys = DATA.flow.map(f=>f.y);
+  const x0=Math.min(...xs,-0.05), x1=Math.max(...xs,0.05);
+  const y0=Math.min(...ys,-0.02), y1=Math.max(...ys,0.02);
+  const X=v=>L+(v-x0)/(x1-x0)*(R-L), Y=v=>B-(v-y0)/(y1-y0)*(B-T);
+  // grid + axes
+  ctx.strokeStyle='#21262d'; ctx.fillStyle='#6e7681'; ctx.font='10px sans-serif';
+  for(const gv of [0]){ ctx.beginPath();ctx.moveTo(X(gv),T);ctx.lineTo(X(gv),B);ctx.stroke(); ctx.beginPath();ctx.moveTo(L,Y(gv));ctx.lineTo(R,Y(gv));ctx.stroke(); }
+  ctx.textAlign='center'; ctx.fillText('20日动量 →', (L+R)/2, H-6);
+  ctx.save(); ctx.translate(12,(T+B)/2); ctx.rotate(-Math.PI/2); ctx.fillText('年化展期收益(back+) →', 0, 0); ctx.restore();
+  // arrows + dots
+  DATA.flow.forEach(f=>{
+    const x=X(f.x), y=Y(f.y), x0p=X(f.x0), y0p=y;
+    const dx=x-x0p;
+    if (Math.abs(dx)>6){ ctx.strokeStyle='rgba(210,168,255,.5)'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(x0p,y0p); ctx.lineTo(x,y); ctx.stroke(); }
+    ctx.fillStyle = chgColor(f.x);
+    ctx.beginPath(); ctx.arc(x,y,4.5,0,7); ctx.fill();
+    ctx.fillStyle='#e6edf3'; ctx.font='11px sans-serif'; ctx.textAlign='left';
+    ctx.fillText(f.name, x+7, y+3.5);
+  });
+}
+
+function renderTable(){
+  const rows = [...DATA.nodes].sort((a,b)=>b.m20-a.m20);
+  const t = document.getElementById('dtable');
+  const maxOI = Math.max(...DATA.nodes.map(n=>n.oi));
+  t.innerHTML = `<tr><th>品种</th><th>链</th><th>位置</th><th>最新</th><th>1日%</th><th>5日%</th><th>20日%</th><th>60日%</th><th>持仓</th><th style="width:120px">OI规模</th><th>5日OI%</th><th>20日OI%</th><th>展期年化%</th></tr>` +
+    rows.map(n=>`<tr>
+      <td><b>${n.name}</b> <span style="color:#6e7681">${n.var}</span></td>
+      <td style="text-align:left;color:#8b949e">${n.chain}</td>
+      <td>${['原料','中游','下游'][n.stage]}</td>
+      <td>${n.px}</td>
+      <td class="${n.chg1>0?'pos':n.chg1<0?'neg':'flat'}">${(n.chg1*100).toFixed(2)}</td>
+      <td class="${n.m5>0?'pos':n.m5<0?'neg':'flat'}">${(n.m5*100).toFixed(1)}</td>
+      <td class="${n.m20>0?'pos':n.m20<0?'neg':'flat'}">${(n.m20*100).toFixed(1)}</td>
+      <td class="${n.m60>0?'pos':n.m60<0?'neg':'flat'}">${(n.m60*100).toFixed(1)}</td>
+      <td>${fmtOI(n.oi)}</td>
+      <td><span class="bar" style="width:${Math.sqrt(n.oi/maxOI)*100}px;background:#1f6feb"></span></td>
+      <td class="${n.oi5>0?'pos':'neg'}">${(n.oi5*100).toFixed(1)}</td>
+      <td class="${n.oi20>0?'pos':'neg'}">${(n.oi20*100).toFixed(1)}</td>
+      <td class="${n.roll==null?'flat':(n.roll>0?'pos':'neg')}">${n.roll==null?'—':(n.roll*100).toFixed(1)}</td>
+    </tr>`).join('');
+}
+
+function showTip(n, el){
+  const tip = document.getElementById('tip');
+  const term = n.curve.map(t=>`${t.m}:${t.px.toFixed(1)}(${fmtOI(t.oi)})`).join(' ');
+  tip.innerHTML = `<h4>${n.name} (${n.var}) — ${n.chain}/${['原料','中游','下游'][n.stage]}</h4>
+    <table>
+    <tr><td>最新价</td><td class="v">${n.px}</td></tr>
+    <tr><td>1/5/20/60日</td><td class="v">${(n.chg1*100).toFixed(2)} / ${(n.m5*100).toFixed(1)} / ${(n.m20*100).toFixed(1)} / ${(n.m60*100).toFixed(1)}%</td></tr>
+    <tr><td>持仓</td><td class="v">${fmtOI(n.oi)}手 (5日${(n.oi5*100).toFixed(1)}%, 20日${(n.oi20*100).toFixed(1)}%)</td></tr>
+    <tr><td>展期年化</td><td class="v">${n.roll==null?'—':(n.roll*100).toFixed(2)+'%'} ${n.roll!=null?(n.roll>0?'(contango)':'(back)'):''}</td></tr>
+    </table>
+    <div style="margin-top:6px;color:#8b949e;font-size:11px">${term}</div>`;
+  const r = el.getBoundingClientRect();
+  tip.style.display='block';
+  tip.style.left = Math.min(r.left, innerWidth-360)+'px';
+  tip.style.top = (r.bottom+8)+'px';
+}
+document.addEventListener('click', e=>{ if(!e.target.closest('.node,.tcell')) document.getElementById('tip').style.display='none'; });
+
+// color mode switch: click legend badges
+document.querySelectorAll('.legend .stage-badge').forEach((b,i)=>b.onclick=()=>{ colorMode=i; renderChains(); });
+
+fetch('futpan.json').then(r=>r.json()).then(d=>{
+  DATA = d;
+  document.getElementById('sub').innerHTML = `更新于 <b>${d.updated_at}</b> · ${d.stats.n} 品种 · 数据源: 新浪期货(主力连续+全合约) ${d.stats.fail&&d.stats.fail.length?'<span class="updated-stale">缺失:'+d.stats.fail.join(',')+'</span>':''}`;
+  renderChains(); renderWall(); renderManifold(); renderTable();
+  addEventListener('resize', ()=>{renderManifold();});
+});
+</script>
+</body>
+</html>

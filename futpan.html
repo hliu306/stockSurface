@@ -246,14 +246,16 @@ function renderWall(){
 
 function renderManifold(){
   const cv = document.getElementById('mfcanvas');
-  // 正方形画布: 边长=min(可用宽, 560), 不随宽屏拉伸
-  const S = Math.min(Math.max(cv.parentElement.parentElement.clientWidth - 60, 320), 560);
+  // 自适应正方形: 边长=可用宽度(最长边), 上限1200防过高; 内部绘图框强制宽=高
+  const S = Math.min(Math.max(cv.parentElement.parentElement.clientWidth - 48, 320), 1200);
   const W = S, H = S;
   cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio;
   cv.style.width = W+'px'; cv.style.height = H+'px';
   const ctx = cv.getContext('2d'); ctx.scale(devicePixelRatio,devicePixelRatio);
   ctx.clearRect(0,0,W,H);
-  const L=64,R=W-16,T=16,B=H-36;
+  const ML=64, MR=16, MT=16, MB=36;
+  const PW = Math.min(W-ML-MR, H-MT-MB);          // 绘图框边长(正方形保证)
+  const L=ML, T=MT, R=L+PW, B=T+PW;
   const xs = DATA.flow.map(f=>f.x), ys = DATA.flow.map(f=>f.y);
   // 离群值温和压缩: 各轴按2%分位截断, 点保持在框内
   const q = (arr,p)=>arr.slice().sort((a,b)=>a-b)[Math.floor(p*(arr.length-1))];

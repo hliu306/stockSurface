@@ -10,10 +10,14 @@
   h1 { font-size:20px; margin-bottom:2px; }
   .sub { color:#8b949e; font-size:12px; margin-bottom:14px; }
   .sub b { color:#58a6ff; }
-  .legend { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:14px; font-size:12px; color:#8b949e; }
+  .legend { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:14px; font-size:12px; color:#8b949e; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:10px 14px; }
+  .lg-group { display:flex; gap:8px; align-items:center; }
+  .lg-sep { width:1px; height:18px; background:#30363d; }
   .lg-item { display:flex; gap:5px; align-items:center; }
   .sw { width:14px; height:14px; border-radius:3px; }
-  .stage-badge { padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+  .stage-badge { padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid transparent; user-select:none; }
+  .stage-badge:hover { border-color:#58a6ff; }
+  .stage-badge.active { outline:2px solid #58a6ff; outline-offset:1px; }
   /* ─── L1 拓扑 ─── */
   #chains { display:grid; grid-template-columns:repeat(auto-fit,minmax(430px,1fr)); gap:14px; }
   .chain { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:12px 12px 10px; }
@@ -64,11 +68,21 @@
 <div class="sub" id="sub">加载中…</div>
 
 <div class="legend">
-  <span class="lg-item"><span class="sw" id="sw-up" style="background:#f85149"></span>涨</span>
-  <span class="lg-item"><span class="sw" id="sw-dn" style="background:#3fb950"></span>跌</span>
-  <span class="lg-item" style="margin-left:8px">色=涨跌幅，点开切换：</span>
-  <span class="lg-item"><span class="stage-badge" style="background:#1f6feb33;color:#79c0ff">1日</span><span class="stage-badge" style="background:#23863533;color:#7ee787">5日</span><span class="stage-badge" style="background:#8957e533;color:#d2a8ff">20日</span><span class="stage-badge" style="background:#bf870033;color:#e3b341">60日</span></span>
-  <span class="lg-item" style="margin-left:8px">块高=持仓量，底条=5日持仓变化</span>
+  <span class="lg-group">
+    <span class="lg-item"><span class="sw" style="background:#f85149"></span>涨</span>
+    <span class="lg-item"><span class="sw" style="background:#3fb950"></span>跌</span>
+  </span>
+  <span class="lg-sep"></span>
+  <span class="lg-group">
+    <span class="lg-item">颜色周期：</span>
+    <span class="stage-badge" style="background:#1f6feb33;color:#79c0ff">1日</span><span class="stage-badge" style="background:#23863533;color:#7ee787">5日</span><span class="stage-badge" style="background:#8957e533;color:#d2a8ff">20日</span><span class="stage-badge" style="background:#bf870033;color:#e3b341">60日</span>
+  </span>
+  <span class="lg-sep"></span>
+  <span class="lg-item">块高 = 持仓量</span>
+  <span class="lg-sep"></span>
+  <span class="lg-item">底条 = 5日持仓变化</span>
+  <span class="lg-sep"></span>
+  <span class="lg-item" style="color:#6e7681">点色块看详情 · 点标签切换周期</span>
 </div>
 
 <div id="chains"></div>
@@ -229,7 +243,7 @@ function showTip(n, el){
     <tr><td>最新价</td><td class="v">${n.px}</td></tr>
     <tr><td>1/5/20/60日</td><td class="v">${(n.chg1*100).toFixed(2)} / ${(n.m5*100).toFixed(1)} / ${(n.m20*100).toFixed(1)} / ${(n.m60*100).toFixed(1)}%</td></tr>
     <tr><td>持仓</td><td class="v">${fmtOI(n.oi)}手 (5日${(n.oi5*100).toFixed(1)}%, 20日${(n.oi20*100).toFixed(1)}%)</td></tr>
-    <tr><td>展期年化</td><td class="v">${n.roll==null?'—':(n.roll*100).toFixed(2)+'%'} ${n.roll!=null?(n.roll>0?'(contango)':'(back)'):''}</td></tr>
+    <tr><td>展期年化</td><td class="v">${n.roll==null?'—':(n.roll*100).toFixed(2)+'%'} ${n.roll!=null?(n.roll>0?'(back·现货紧)':'(contango·库存压)'):''}</td></tr>
     </table>
     <div style="margin-top:6px;color:#8b949e;font-size:11px">${term}</div>`;
   const r = el.getBoundingClientRect();
@@ -239,13 +253,14 @@ function showTip(n, el){
 }
 document.addEventListener('click', e=>{ if(!e.target.closest('.node,.tcell')) document.getElementById('tip').style.display='none'; });
 
-// color mode switch: click legend badges
-document.querySelectorAll('.legend .stage-badge').forEach((b,i)=>b.onclick=()=>{ colorMode=i; renderChains(); });
+// color mode switch: click legend badges (+高亮当前选中)
+function refreshBadges(){ document.querySelectorAll('.legend .stage-badge').forEach((b,i)=>b.classList.toggle('active', i===colorMode)); }
+document.querySelectorAll('.legend .stage-badge').forEach((b,i)=>b.onclick=()=>{ colorMode=i; refreshBadges(); renderChains(); });
 
 fetch('futpan/futpan.json').then(r=>r.json()).then(d=>{
   DATA = d;
   document.getElementById('sub').innerHTML = `更新于 <b>${d.updated_at}</b> · ${d.stats.n} 品种 · 数据源: 新浪期货(主力连续+全合约) ${d.stats.fail&&d.stats.fail.length?'<span class="updated-stale">缺失:'+d.stats.fail.join(',')+'</span>':''}`;
-  renderChains(); renderWall(); renderManifold(); renderTable();
+  renderChains(); renderWall(); renderManifold(); renderTable(); refreshBadges();
   addEventListener('resize', ()=>{renderManifold();});
 });
 </script>

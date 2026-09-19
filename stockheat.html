@@ -606,6 +606,7 @@ function ensureModalDom(){
         '<div id="imHint" style="color:#8b949e;font-size:11px;margin:4px 0 10px;">滚轮缩放 · 拖拽平移 · 双击复位 · 十字线读值 (THS 行业指数日线 2015→今)</div>'+
         '<canvas id="imCanvas2" style="width:100%;height:190px;"></canvas>'+
         '<div id="imCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;"></div>'+
+      '<div style="margin-top:10px;"><button id="imDevia" style="display:none;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;">叠加行业偏离线</button></div>'+
         '<div class="note" style="margin-top:12px;">子页面为独立 HTML,含全部历史(2015→今)评分/排名,可收藏/分享; 浮窗为快视图。</div>'+
       '</div>'+
     '</div>';
@@ -881,8 +882,13 @@ function drawStockModal(st){
   // 按钮改挂: 子页面按钮→生成个股子页面; THS按钮→个股页
   document.getElementById('imThs').onclick = function(){ window.open('http://stockpage.10jqka.com.cn/' + st.ts_code.substring(0,6) + '/', '_blank'); };
   document.getElementById('imNewPage').onclick = function(){ openStockSubPage(st); };
+  var dbtn = document.getElementById('imDevia');
+  if (dbtn){ dbtn.style.display = ''; dbtn.textContent = (SM_Devia ? '已叠行业偏离线' : '叠加行业偏离线'); }
+  SM_Devia = SM_Devia || false;
   SMD = { st: st, view: { i0: Math.max(0, st.dates.length-260), i1: st.dates.length } };
+  smBuildDevia();
   IMK = null;   // 行业K线态清空(避免imDrawK误用)
+  var _db = document.getElementById('imDevia'); if (_db) _db.style.display = 'none';
   smBind();
   smDraw();
 }
@@ -916,6 +922,17 @@ function smBind(){
   cv.addEventListener('dblclick', function(){
     if (SMD){ SMD.view = { i0: Math.max(0, SMD.st.dates.length-260), i1: SMD.st.dates.length }; smDraw(); }
   });
+  // DEVIA切换
+  setTimeout(function(){
+    var db = document.getElementById('imDevia');
+    if (db && !db.__dbound){ db.__dbound = true;
+      db.addEventListener('click', function(){
+        SM_Devia = !SM_Devia;
+        db.textContent = SM_Devia ? '已叠行业偏离线 ✓ (点击隐藏)' : '叠加行业偏离线';
+        smDraw();
+      });
+    }
+  }, 0);
 }
 function smDraw(){
   var cv = document.getElementById('imCanvas'); if (!cv || !SMD) return;
@@ -996,9 +1013,83 @@ function smDraw(){
       ctx.fillStyle='#e6edf3'; ctx.fillText(info, L+10, T+15);
     }
   }
+  if (SM_Devia && SMD.devia) smDrawDevia(ctx, L, R, T, B, n);
   smDrawCards(st);
   smDrawBars(st);
 }
+
+// ═══ DEVIA 行业偏离指标 ═══ 个股相对行业指数的累计偏离(EMA衰减, 半衰≈11日)
+// ddev = 个股日涨跌% − 行业日涨跌%;  DEVI(t) = DEVI(t-1)·λ + ddev(t), λ=0.94
+// 读法: >0 跑赢行业(强), <0 跑输(弱), |DEVI|越大偏离越久/越深; 快速拉升=独立行情
+var SM_Devia = false;   // 叠加开关
+var SM_IND_CACHE = null;  // 行业指数收盘缓存 {code:{date:close}}
+function smBuildDevia(){
+  if (!SMD || !SMD.st) { SMD.devia = null; return; }
+  var st = SMD.st, code = CUR ? String(CUR.ths_code) : null;
+  SMD.devia = null;
+  if (!code) return;
+  // 行业指数日线(同步缓存): 从ths_kline取, 若未加载过则异步拉(拉到后smDraw刷新)
+  if (!SM_IND_CACHE) SM_IND_CACHE = {};
+  var K = SM_IND_CACHE[code];
+  if (!K){
+    fetch('ths_kline/' + code + '.json?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var m = {}; (j.rows||[]).forEach(function(p){ m[String(p[0])] = p[4]; });  // date->close
+      SM_IND_CACHE[code] = m;
+      smBuildDevia(); smDraw();   // 拿到后重算重画
+    }).catch(function(){});
+    return;   // 本帧先不画, 等数据到
+  }
+  // 行业逐日涨跌%(用指数close)
+  var indPct = {}, ks = Object.keys(K), prev = null;
+  ks.sort();
+  ks.forEach(function(d){ if (prev != null && K[prev] > 0) indPct[d] = (K[d]/K[prev]-1)*100; prev = d; });
+  // 逐日ddev → DEVI序列(对齐个股dates)
+  var LAM = 0.94, dev = 0, out = new Array(st.dates.length).fill(null);
+  for (var i=0;i<st.dates.length;i++){
+    var d = String(st.dates[i]);
+    var sp = st.pct[i], ip = indPct[d];
+    if (sp == null || ip == null){ dev = dev * LAM; continue; }  // 停牌/缺数: 只衰减
+    dev = dev * LAM + (sp - ip);
+    out[i] = dev;
+  }
+  SMD.devia = out;
+}
+function smDrawDevia(ctx, L, R, T, B, n){
+  // DEVIA叠加在主图: 右侧独立轴(±对称), 橙色线, 零轴=与行业同步
+  var dv = SMD.devia; if (!dv) return;
+  var vw = SMD.view;
+  var vals = [];
+  for (var i=vw.i0;i<vw.i1;i++){ if (dv[i]!=null) vals.push(dv[i]); }
+  if (!vals.length) return;
+  var a = Math.max.apply(null, vals.map(Math.abs));
+  if (!(a > 0)) return;
+  var lim = a * 1.15;
+  function YD(v){ return T + (1-(v/lim+1)/2) * (B-T); }  // -lim→B, +lim→T
+  // 零轴
+  ctx.strokeStyle = '#30363d'; ctx.setLineDash([5,4]);
+  ctx.beginPath(); ctx.moveTo(L,YD(0)); ctx.lineTo(R,YD(0)); ctx.stroke(); ctx.setLineDash([]);
+  // 通道带(±lim/2 内=同步带)
+  ctx.fillStyle = 'rgba(212,167,44,0.06)';
+  ctx.fillRect(L, YD(lim/2), R-L, YD(-lim/2)-YD(lim/2));
+  // DEVIA线
+  ctx.strokeStyle = '#e3b341'; ctx.lineWidth = 1.6;
+  ctx.beginPath(); var st3=false;
+  for (var i2=vw.i0;i2<vw.i1;i2++){
+    if (dv[i2]==null) continue;
+    var x = L + (i2-vw.i0+0.5)*(R-L)/n, y = YD(dv[i2]);
+    if (!st3){ ctx.moveTo(x,y); st3=true; } else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  // 右轴标注(叠在价格轴更右侧? 用主图右轴x=R+6已有价格 — DEVIA轴放左侧)
+  ctx.fillStyle = '#e3b341'; ctx.font='10px sans-serif'; ctx.textAlign='left';
+  ctx.fillText('+'+lim.toFixed(1), L+4, T+10);
+  ctx.fillText('0', L+4, YD(0)-3);
+  ctx.fillText('-'+lim.toFixed(1), L+4, B-4);
+  ctx.fillText('DEVIA 行业偏离', L+44, T+10);
+}
+
 function smDrawBars(st){
   // 双随动bar(与主图视窗同区间): 上=个股当日涨跌色 | 下=所属行业评分五档色
   var cv = document.getElementById('imCanvas2'); if (!cv || !SMD) return;
@@ -1075,6 +1166,15 @@ function smDrawCards(st){
     ['近20日累计', p20.length? (sum20>=0?'+':'')+sum20.toFixed(2)+'%' : '—', sum20>=0?'#3fb950':'#f85149', '日均涨跌 '+(p20.length?(sum20/p20.length>=0?'+':'')+(sum20/p20.length).toFixed(2)+'%':'—')],
     ['20日均换手', tAvg!=null? tAvg.toFixed(2)+'%' : '—', '#d2a8ff', '活跃度'],
     ['上市以来', ytd!=null? (ytd>=0?'+':'')+ytd.toFixed(1)+'%' : '—', '#79c0ff', '共'+st.dates.length+'交易日'],
+    ['行业偏离DEVIA', (function(){
+      if (!SMD || !SMD.devia) return '—';
+      var d=SMD.devia; for (var i=d.length-1;i>=0;i--){ if (d[i]!=null) return (d[i]>=0?'+':'')+d[i].toFixed(1); }
+      return '—';
+    })(), (function(){
+      if (!SMD || !SMD.devia) return '#8b949e';
+      var d=SMD.devia; for (var i=d.length-1;i>=0;i--){ if (d[i]!=null) return d[i]>=0?'#3fb950':'#f85149'; }
+      return '#8b949e';
+    })(), 'E M A(0.94)·λ衰减·>0跑赢行业'],
   ];
   document.getElementById('imCards').innerHTML = cards.map(function(c){
     return '<div class="imcv"><div class="l">'+c[0]+'</div><div class="v" style="color:'+c[2]+';">'+c[1]+'</div><div class="s">'+c[3]+'</div></div>';
@@ -1103,6 +1203,7 @@ function openStockSubPage(st){
 }
 
 function drawIndModal(code, name){
+  var _db2 = document.getElementById('imDevia'); if (_db2) _db2.style.display = 'none';
   ensureModalDom();
   MODAL.dataset.code = code;
   MODAL.style.display = 'flex';

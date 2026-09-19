@@ -1100,7 +1100,9 @@ function smDrawDevia(ctx, L, R, T, B, n){
   ctx.fillText('+'+lim.toFixed(1), L+4, T+10);
   ctx.fillText('0', L+4, YD(0)-3);
   ctx.fillText('-'+lim.toFixed(1), L+4, B-4);
-  ctx.fillText('橙粗=累计DEVI·橙细=当日偏离(vs行业)', L+44, T+10);
+  ctx.textAlign = 'right';
+  ctx.fillText('橙粗=累计DEVI·橙细=当日偏离(vs行业)', R-6, T+10);
+  ctx.textAlign = 'left';
 }
 
 function smDrawBars(st){

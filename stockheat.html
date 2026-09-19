@@ -132,6 +132,7 @@ a { color:#7aa2f7; }
       <option value="pct" selected>涨跌幅%</option>
       <option value="amount">成交额(万元)</option>
       <option value="turn">换手率%</option>
+      <option value="devia">行业偏离DEVI</option>
     </select>
     <label>色阶</label>
     <select id="scaleSel">
@@ -206,7 +207,20 @@ var CUR = null;          // current industry data
 var AXIS = null;         // union sorted dates of current industry
 var POS = null;          // per stock: {dateStr -> array index}
 var ROWS = null;         // current drawn rows: [{stock, }] in draw order
+var DEVIA_LIM = 5;
 var GEOM = null;         // {padL, padT, cellW, cellH, dates}
+
+// DEVI diverging色: 对称±DEVIA_LIM, +红(跑赢行业)/-绿(跑输), 与热力图A股色道一致
+function deviaColor(v){
+  var t = Math.max(-1, Math.min(1, v / (DEVIA_LIM || 5)));
+  if (t >= 0) {  // 红: 0→#2c2c44, 1→#d32f2f (复用pct红的深度曲线)
+    var c = pctColorCont(t * 10);   // +10%=最深红
+    return c;
+  } else {        // 绿: -0.5→中绿, -1→深绿
+    var c2 = pctColorCont(t * 10);  // -10%=最深绿
+    return c2;
+  }
+}
 
 // ── A股惯例: 红涨绿跌 ──
 function pctColorCont(v) {
@@ -299,7 +313,16 @@ function draw() {
 
   // sequential metrics: percentile scale from visible window
   var seqLo = 0, seqHi = 1;
-  if (metric !== 'pct') {
+  if (metric === 'devia'){
+    var dvals = [];
+    rows.forEach(function(st){
+      if (!st.devia) return;
+      dates.forEach(function(d){ var p = POS[st.ts_code][d]; if (p !== undefined && st.devia[p] != null) dvals.push(Math.abs(st.devia[p])); });
+    });
+    if (dvals.length){ dvals.sort(function(a,b){return a-b;}); DEVIA_LIM = dvals[Math.floor(dvals.length*0.98)] || 5; }
+    else DEVIA_LIM = 5;
+  }
+  if (metric !== 'pct' && metric !== 'devia') {
     var vals = [];
     rows.forEach(function(st) {
       var arr = st[metric], pos = POS[st.ts_code];
@@ -340,6 +363,7 @@ function draw() {
       if (v == null) continue;
       var col;
       if (metric === 'pct') col = (scale === 'tier') ? pctColorTier(v) : pctColorCont(v);
+      else if (metric === 'devia') col = deviaColor(v);
       else {
         var t = (Math.log(v + 1) - Math.log(seqLo + 1)) / (Math.log(seqHi + 1) - Math.log(seqLo + 1));
         col = seqColor(t);
@@ -373,7 +397,11 @@ function draw() {
 
   // legend
   var lg = document.getElementById('legend');
-  if (metric === 'pct') {
+  if (metric === 'devia') {
+    lg.innerHTML = '<span>行业偏离DEVI(±' + DEVIA_LIM.toFixed(1) + '满幅, 红=跑赢行业 绿=跑输, EMA0.94累计):</span>' +
+      [['#d32f2f','>+'+DEVIA_LIM.toFixed(0)],['#ef6c61','跑赢'],['#2c2c44','同步'],['#4da374','跑输'],['#2e7d32','<-'+DEVIA_LIM.toFixed(0)]]
+      .map(function(x){ return '<i style="background:'+x[0]+'"></i>'+x[1]; }).join('');
+  } else if (metric === 'pct') {
     if (scale === 'tier') {
       lg.innerHTML = '<span>5档(红涨绿跌):</span>' +
         [['#d32f2f','>+5%'],['#ef6c61','+2~5%'],['#2c2c44','±2%'],['#4da374','-2~5%'],['#2e7d32','<-5%']]
@@ -554,13 +582,51 @@ function drawRowTier() {
   document.getElementById('rowTierHint').textContent = ' · ' + CUR.industry + ' ' + drawn + '天有评' + (gray ? ' / ' + gray + '天缺评(灰)' : '');
 }
 
+// ═══ 热力图DEVI: 全行业个股DEVI预计算(个股-行业指数偏离, EMA 0.94) ═══
+var HEAT_IND_CACHE = {};   // {ths_code: {date: indClose}}
+var HEAT_DEVIA_DONE = {};  // {industryCode: true}
+function heatBuildDevia(code){
+  if (HEAT_DEVIA_DONE[code] || !CUR || !CUR.stocks) return;
+  var K = HEAT_IND_CACHE[code];
+  if (!K){
+    fetch('ths_kline/' + code + '.json?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var m = {}; (j.rows||[]).forEach(function(p){ m[String(p[0])] = p[4]; });
+      HEAT_IND_CACHE[code] = m;
+      heatBuildDevia(code);
+      // 数据到齐重算重画(若当前metric是devia或已开弹窗)
+      if (CUR && CUR.ths_code == code) draw();
+    }).catch(function(){});
+    return;
+  }
+  // 行业逐日涨跌%
+  var ks = Object.keys(K); ks.sort();
+  var indPct = {}, prev = null;
+  ks.forEach(function(d){ if (prev != null && K[prev] > 0) indPct[d] = (K[d]/K[prev]-1)*100; prev = d; });
+  var LAM = 0.94;
+  CUR.stocks.forEach(function(st){
+    var dev = 0, out = new Array(st.dates.length).fill(null);
+    for (var i=0;i<st.dates.length;i++){
+      var d = String(st.dates[i]);
+      var sp = st.pct[i], ip = indPct[d];
+      if (sp == null || ip == null){ dev = dev*LAM; continue; }
+      dev = dev*LAM + (sp - ip);
+      out[i] = dev;
+    }
+    st.devia = out;
+  });
+  HEAT_DEVIA_DONE[code] = true;
+  draw();
+}
+
 function loadIndustry(code) {
-  if (CACHE[code]) { CUR = CACHE[code]; afterLoad(); return; }
+  if (CACHE[code]) { CUR = CACHE[code]; afterLoad(); heatBuildDevia(code); return; }
   document.getElementById('status').textContent = '加载行业数据...';
   fetch('stock_heat/' + code + '.json?_=' + Date.now())
     .then(function(r){ return r.json(); })
     .then(function(d) {
-      CACHE[code] = d; CUR = d; afterLoad();
+      CACHE[code] = d; CUR = d; afterLoad(); heatBuildDevia(code);
     })
     .catch(function(e){ document.getElementById('status').textContent = '加载失败: ' + e; });
 }
@@ -643,6 +709,7 @@ function closeModal(){ if (MODAL) MODAL.style.display='none'; }
       (val('pct') === '—' ? '—' : ((st.pct[p] > 0 ? '+' : '') + st.pct[p].toFixed(2) + '%')) + '</b><br>' +
       '收盘 ' + val('close') + ' · 成交 ' + (st.amount[p] == null ? '—' : fmtWan(st.amount[p])) +
       ' · 换手 ' + (st.turn[p] == null ? '—' : st.turn[p].toFixed(2) + '%') +
+      (st.devia && st.devia[p] != null ? '<br>行业偏离 <b style="color:' + (st.devia[p] >= 0 ? '#f66' : '#6c9') + '">' + (st.devia[p]>=0?'+':'') + st.devia[p].toFixed(2) + '</b> (红=跑赢行业)' : '') +
       '<br><span style="color:#667">点击 → 个股弹窗 (Esc关闭)</span>';
     var tx = e.clientX + 14, ty = e.clientY + 14;
     if (tx + 240 > window.innerWidth) tx = e.clientX - 230;

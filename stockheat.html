@@ -882,9 +882,9 @@ function drawStockModal(st){
   // 按钮改挂: 子页面按钮→生成个股子页面; THS按钮→个股页
   document.getElementById('imThs').onclick = function(){ window.open('http://stockpage.10jqka.com.cn/' + st.ts_code.substring(0,6) + '/', '_blank'); };
   document.getElementById('imNewPage').onclick = function(){ openStockSubPage(st); };
+  if (SM_Devia === undefined || SM_Devia === null) SM_Devia = true;   // 首开默认显示
   var dbtn = document.getElementById('imDevia');
-  if (dbtn){ dbtn.style.display = ''; dbtn.textContent = (SM_Devia ? '已叠行业偏离线' : '叠加行业偏离线'); }
-  SM_Devia = SM_Devia || false;
+  if (dbtn){ dbtn.style.display = ''; dbtn.textContent = SM_Devia ? '✕ 隐藏行业偏离线' : '叠加行业偏离线'; }
   SMD = { st: st, view: { i0: Math.max(0, st.dates.length-260), i1: st.dates.length } };
   smBuildDevia();
   IMK = null;   // 行业K线态清空(避免imDrawK误用)
@@ -928,7 +928,7 @@ function smBind(){
     if (db && !db.__dbound){ db.__dbound = true;
       db.addEventListener('click', function(){
         SM_Devia = !SM_Devia;
-        db.textContent = SM_Devia ? '已叠行业偏离线 ✓ (点击隐藏)' : '叠加行业偏离线';
+        db.textContent = SM_Devia ? '✕ 隐藏行业偏离线' : '叠加行业偏离线';
         smDraw();
       });
     }
@@ -1021,7 +1021,7 @@ function smDraw(){
 // ═══ DEVIA 行业偏离指标 ═══ 个股相对行业指数的累计偏离(EMA衰减, 半衰≈11日)
 // ddev = 个股日涨跌% − 行业日涨跌%;  DEVI(t) = DEVI(t-1)·λ + ddev(t), λ=0.94
 // 读法: >0 跑赢行业(强), <0 跑输(弱), |DEVI|越大偏离越久/越深; 快速拉升=独立行情
-var SM_Devia = false;   // 叠加开关
+var SM_Devia = true;    // 叠加开关(默认显示)
 var SM_IND_CACHE = null;  // 行业指数收盘缓存 {code:{date:close}}
 function smBuildDevia(){
   if (!SMD || !SMD.st) { SMD.devia = null; return; }
@@ -1077,8 +1077,8 @@ function smDrawDevia(ctx, L, R, T, B, n){
   // 通道带(±lim/2 内=同步带)
   ctx.fillStyle = 'rgba(212,167,44,0.06)';
   ctx.fillRect(L, YD(lim/2), R-L, YD(-lim/2)-YD(lim/2));
-  // 当日偏离ddev(细黄线, 半透明)
-  ctx.strokeStyle = 'rgba(227,179,65,0.45)'; ctx.lineWidth = 1;
+  // 当日偏离ddev(细橙线, 半透明)
+  ctx.strokeStyle = 'rgba(255,166,87,0.40)'; ctx.lineWidth = 1;
   ctx.beginPath(); var st2=false;
   for (var i3=vw.i0;i3<vw.i1;i3++){
     if (dd[i3]==null) continue;
@@ -1086,8 +1086,8 @@ function smDrawDevia(ctx, L, R, T, B, n){
     if (!st2){ ctx.moveTo(x3,y3); st2=true; } else ctx.lineTo(x3,y3);
   }
   ctx.stroke();
-  // DEVIA线
-  ctx.strokeStyle = '#e3b341'; ctx.lineWidth = 1.6;
+  // DEVIA累计线(亮橙, 区别于MA20黄)
+  ctx.strokeStyle = '#ffa657'; ctx.lineWidth = 1.8;
   ctx.beginPath(); var st3=false;
   for (var i2=vw.i0;i2<vw.i1;i2++){
     if (dv[i2]==null) continue;
@@ -1096,11 +1096,11 @@ function smDrawDevia(ctx, L, R, T, B, n){
   }
   ctx.stroke();
   // 右轴标注(叠在价格轴更右侧? 用主图右轴x=R+6已有价格 — DEVIA轴放左侧)
-  ctx.fillStyle = '#e3b341'; ctx.font='10px sans-serif'; ctx.textAlign='left';
+  ctx.fillStyle = '#ffa657'; ctx.font='10px sans-serif'; ctx.textAlign='left';
   ctx.fillText('+'+lim.toFixed(1), L+4, T+10);
   ctx.fillText('0', L+4, YD(0)-3);
   ctx.fillText('-'+lim.toFixed(1), L+4, B-4);
-  ctx.fillText('粗橙=累计DEVI(0.94衰减) 细黄=当日偏离', L+44, T+10);
+  ctx.fillText('橙粗=累计DEVI·橙细=当日偏离(vs行业)', L+44, T+10);
 }
 
 function smDrawBars(st){

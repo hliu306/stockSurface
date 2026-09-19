@@ -1045,23 +1045,27 @@ function smBuildDevia(){
   var indPct = {}, ks = Object.keys(K), prev = null;
   ks.sort();
   ks.forEach(function(d){ if (prev != null && K[prev] > 0) indPct[d] = (K[d]/K[prev]-1)*100; prev = d; });
-  // 逐日ddev → DEVI序列(对齐个股dates)
+  // 逐日ddev → 双序列(对齐个股dates): ddev=当日偏离(原始), devia=衰减累计
   var LAM = 0.94, dev = 0, out = new Array(st.dates.length).fill(null);
+  var dd = new Array(st.dates.length).fill(null);
   for (var i=0;i<st.dates.length;i++){
     var d = String(st.dates[i]);
     var sp = st.pct[i], ip = indPct[d];
     if (sp == null || ip == null){ dev = dev * LAM; continue; }  // 停牌/缺数: 只衰减
-    dev = dev * LAM + (sp - ip);
+    dd[i] = sp - ip;
+    dev = dev * LAM + dd[i];
     out[i] = dev;
   }
   SMD.devia = out;
+  SMD.ddev = dd;
 }
 function smDrawDevia(ctx, L, R, T, B, n){
-  // DEVIA叠加在主图: 右侧独立轴(±对称), 橙色线, 零轴=与行业同步
+  // 双线叠加在主图(±对称独立轴): 细黄=当日偏离ddev(每日一点) | 粗橙=累计DEVI(EMA 0.94)
   var dv = SMD.devia; if (!dv) return;
+  var dd = SMD.ddev || [];
   var vw = SMD.view;
   var vals = [];
-  for (var i=vw.i0;i<vw.i1;i++){ if (dv[i]!=null) vals.push(dv[i]); }
+  for (var i=vw.i0;i<vw.i1;i++){ if (dv[i]!=null) vals.push(dv[i]); if (dd[i]!=null) vals.push(dd[i]); }
   if (!vals.length) return;
   var a = Math.max.apply(null, vals.map(Math.abs));
   if (!(a > 0)) return;
@@ -1073,6 +1077,15 @@ function smDrawDevia(ctx, L, R, T, B, n){
   // 通道带(±lim/2 内=同步带)
   ctx.fillStyle = 'rgba(212,167,44,0.06)';
   ctx.fillRect(L, YD(lim/2), R-L, YD(-lim/2)-YD(lim/2));
+  // 当日偏离ddev(细黄线, 半透明)
+  ctx.strokeStyle = 'rgba(227,179,65,0.45)'; ctx.lineWidth = 1;
+  ctx.beginPath(); var st2=false;
+  for (var i3=vw.i0;i3<vw.i1;i3++){
+    if (dd[i3]==null) continue;
+    var x3 = L + (i3-vw.i0+0.5)*(R-L)/n, y3 = YD(dd[i3]);
+    if (!st2){ ctx.moveTo(x3,y3); st2=true; } else ctx.lineTo(x3,y3);
+  }
+  ctx.stroke();
   // DEVIA线
   ctx.strokeStyle = '#e3b341'; ctx.lineWidth = 1.6;
   ctx.beginPath(); var st3=false;
@@ -1087,7 +1100,7 @@ function smDrawDevia(ctx, L, R, T, B, n){
   ctx.fillText('+'+lim.toFixed(1), L+4, T+10);
   ctx.fillText('0', L+4, YD(0)-3);
   ctx.fillText('-'+lim.toFixed(1), L+4, B-4);
-  ctx.fillText('DEVIA 行业偏离', L+44, T+10);
+  ctx.fillText('粗橙=累计DEVI(0.94衰减) 细黄=当日偏离', L+44, T+10);
 }
 
 function smDrawBars(st){
@@ -1166,7 +1179,7 @@ function smDrawCards(st){
     ['近20日累计', p20.length? (sum20>=0?'+':'')+sum20.toFixed(2)+'%' : '—', sum20>=0?'#3fb950':'#f85149', '日均涨跌 '+(p20.length?(sum20/p20.length>=0?'+':'')+(sum20/p20.length).toFixed(2)+'%':'—')],
     ['20日均换手', tAvg!=null? tAvg.toFixed(2)+'%' : '—', '#d2a8ff', '活跃度'],
     ['上市以来', ytd!=null? (ytd>=0?'+':'')+ytd.toFixed(1)+'%' : '—', '#79c0ff', '共'+st.dates.length+'交易日'],
-    ['行业偏离DEVIA', (function(){
+    ['行业偏离', (function(){
       if (!SMD || !SMD.devia) return '—';
       var d=SMD.devia; for (var i=d.length-1;i>=0;i--){ if (d[i]!=null) return (d[i]>=0?'+':'')+d[i].toFixed(1); }
       return '—';
@@ -1174,7 +1187,11 @@ function smDrawCards(st){
       if (!SMD || !SMD.devia) return '#8b949e';
       var d=SMD.devia; for (var i=d.length-1;i>=0;i--){ if (d[i]!=null) return d[i]>=0?'#3fb950':'#f85149'; }
       return '#8b949e';
-    })(), 'E M A(0.94)·λ衰减·>0跑赢行业'],
+    })(), (function(){
+      if (!SMD || !SMD.ddev) return '累计DEVI(0.94衰减)';
+      var d=SMD.ddev; for (var i=d.length-1;i>=0;i--){ if (d[i]!=null) return '当日偏离 '+(d[i]>=0?'+':'')+d[i].toFixed(2)+'% | 累计DEVI'; }
+      return '累计DEVI(0.94衰减)';
+    })()],
   ];
   document.getElementById('imCards').innerHTML = cards.map(function(c){
     return '<div class="imcv"><div class="l">'+c[0]+'</div><div class="v" style="color:'+c[2]+';">'+c[1]+'</div><div class="s">'+c[3]+'</div></div>';

@@ -275,6 +275,7 @@ function draw() {
   // per-stock window stats for sorting
   function statOf(st) {
     var arr = st[metric === 'pct' ? 'pct' : metric], pos = POS[st.ts_code];
+    if (arr === undefined || arr === null) return { last: null, mean: null };   // devia等异步指标未就绪
     var last = null, sum = 0, n = 0;
     for (var i = dates.length - 1; i >= 0 && last === null; i--) {
       var p = pos[dates[i]];
@@ -356,6 +357,7 @@ function draw() {
   for (var i = 0; i < rows.length; i++) {
     var st = rows[i], arr = st[metric], pos = POS[st.ts_code];
     var y = padT + i * rowH;
+    if (arr === undefined || arr === null) continue;   // devia未就绪: 本行暂不画, 算好后draw()重绘
     for (var jj = 0; jj < dates.length; jj++) {
       var p = pos[dates[jj]];
       if (p === undefined) continue;
@@ -587,6 +589,8 @@ var HEAT_IND_CACHE = {};   // {ths_code: {date: indClose}}
 var HEAT_DEVIA_DONE = {};  // {industryCode: true}
 function heatBuildDevia(code){
   if (HEAT_DEVIA_DONE[code] || !CUR || !CUR.stocks) return;
+  var stat = document.getElementById('status');
+  if (stat && document.getElementById('metricSel').value === 'devia') stat.textContent = '计算行业偏离DEVI...';
   var K = HEAT_IND_CACHE[code];
   if (!K){
     fetch('ths_kline/' + code + '.json?_=' + Date.now())

@@ -1,11 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<title>板块内个股热力图 · 同花顺行业</title>
+<title>个股热力图 · 同花顺90行业</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -52,6 +49,12 @@ canvas { display:block; width:100%; cursor:crosshair; }
 .legend .swatch { width:22px; height:10px; display:inline-block; border:1px solid #333; }
 
 a { color:#7aa2f7; }
+
+/* ═══ v2 浮窗补充样式 ═══ */
+#indModal .imcv{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px;}
+#indModal .imcv .l{color:#8b949e;font-size:11px;}
+#indModal .imcv .v{font-size:20px;font-weight:600;margin:2px 0;}
+#indModal .imcv .s{color:#8b949e;font-size:11px;}
 </style>
 </head>
 <body>
@@ -173,7 +176,10 @@ a { color:#7aa2f7; }
 
 <div class="tooltip" id="tip"></div>
 
+
 <script>
+'use strict';
+// ═══ 平移自原版 177-237: 全局声明+配色函数 ═══
 var TIER = null;        // stock_heat_tier.json
 var TIER_STYLE = [
   ['#1A5FD0', '极弱', 1], ['#5FA8FF', '弱', 2], ['#8A8A9A', '中性', 3],
@@ -235,7 +241,10 @@ function seqColor(t) {
 
 function fmtDate(d) { return d.substring(0,4)+'-'+d.substring(4,6)+'-'+d.substring(6,8); }
 function fmtWan(x) { return x >= 10000 ? (x/10000).toFixed(1)+'亿' : Math.round(x).toLocaleString()+'万'; }
-
+</script>
+<script>
+'use strict';
+// ═══ 平移自原版: 绘制主体 ═══
 function draw() {
   var canvas = document.getElementById('stockCanvas');
   if (!CUR) return;
@@ -569,48 +578,329 @@ function afterLoad() {
   drawRowTier();
   drawTierAll();   // refresh yellow highlight of current industry
 }
+</script>
+<script>
+'use strict';
+// ═══ v2 新增部分: 行业下钻浮动窗 ═══
+// 数据源: stock_heat_tier.json (90行业×2848日 评分/排名) — 页面已在加载
+// 浮窗内容: 近一年(250日)评分曲线 + 排名曲线 + 关键指标卡 + 跳转按钮
 
-// ── hover tooltip + click ──
-document.addEventListener('DOMContentLoaded', function() {});
-(function bindHover(){
-  var canvas = document.getElementById('stockCanvas');
-  var tip = document.getElementById('tip');
-  canvas.addEventListener('mousemove', function(e) {
-    if (!GEOM || !ROWS) { tip.style.display = 'none'; return; }
-    var rect = canvas.getBoundingClientRect();
-    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    var i = Math.floor((my - GEOM.padT) / GEOM.cellH);
-    var j = Math.floor((mx - GEOM.padL) / GEOM.cellW);
-    if (i < 0 || i >= ROWS.length || j < 0 || j >= GEOM.dates.length) { tip.style.display = 'none'; return; }
-    var st = ROWS[i], d = GEOM.dates[j];
-    var p = POS[st.ts_code][d];
-    if (p === undefined) { tip.style.display = 'none'; return; }
-    function val(a) { return st[a][p] == null ? '—' : st[a][p]; }
-    tip.innerHTML =
-      '<b style="color:#cde">' + st.name + '</b> <span style="color:#679">' + st.ts_code + '</span><br>' +
-      fmtDate(String(d)) + ' · 涨跌 <b style="color:' + (st.pct[p] > 0 ? '#f66' : (st.pct[p] < 0 ? '#6c9' : '#99a')) + '">' +
-      (val('pct') === '—' ? '—' : ((st.pct[p] > 0 ? '+' : '') + st.pct[p].toFixed(2) + '%')) + '</b><br>' +
-      '收盘 ' + val('close') + ' · 成交 ' + (st.amount[p] == null ? '—' : fmtWan(st.amount[p])) +
-      ' · 换手 ' + (st.turn[p] == null ? '—' : st.turn[p].toFixed(2) + '%') +
-      '<br><span style="color:#667">点击 → 同花顺个股页</span>';
-    var tx = e.clientX + 14, ty = e.clientY + 14;
-    if (tx + 240 > window.innerWidth) tx = e.clientX - 230;
-    if (ty + 100 > window.innerHeight) ty = e.clientY - 90;
-    tip.style.display = 'block'; tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
-  });
-  canvas.addEventListener('mouseleave', function(){ tip.style.display = 'none'; });
-  canvas.addEventListener('click', function(e) {
-    if (!GEOM || !ROWS) return;
-    var rect = canvas.getBoundingClientRect();
-    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    var i = Math.floor((my - GEOM.padT) / GEOM.cellH);
-    var j = Math.floor((mx - GEOM.padL) / GEOM.cellW);
-    if (i < 0 || i >= ROWS.length || j < 0 || j >= GEOM.dates.length) return;
-    var st = ROWS[i];
-    window.open('http://stockpage.10jqka.com.cn/' + st.ts_code.substring(0, 6) + '/', '_blank');
-  });
-})();
+var MODAL=null;
+function ensureModalDom(){
+  if (MODAL) return;
+  var ov=document.createElement('div');
+  ov.id='indModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML=
+    '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:1100px;width:94vw;max-height:92vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.6);">'+
+      '<div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #30363d;position:sticky;top:0;background:#161b22;z-index:2;">'+
+        '<b id="imTitle" style="font-size:16px;color:#e6edf3;"></b>'+
+        '<span id="imSub" class="note"></span>'+
+        '<span style="flex:1"></span>'+
+        '<button id="imNewPage" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">生成子页面 ↗</button>'+
+        '<button id="imThs" style="background:#21262d;col'+'or:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">THS 行业页 ↗</button>'+
+        '<button id="imClose" style="background:#21262d;color:#f85149;border:1px solid #30363d;border-r'+'adius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">✕ 关闭</button>'+
+      '</div>'+
+      '<div style="padding:16px 18px;">'+
+        '<canvas id="imCanvas" style="width:100%;height:380px;cursor:crosshair;"></canvas>'+
+        '<div id="imHint" style="color:#8b949e;font-size:11px;margin:4px 0 10px;">滚轮缩放 · 拖拽平移 · 双击复位 · 十字线读值 (THS 行业指数日线 2015→今)</div>'+
+        '<canvas id="imCanvas2" style="width:100%;height:190px;"></canvas>'+
+        '<div id="imCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;"></div>'+
+        '<div class="note" style="margin-top:12px;">子页面为独立 HTML,含全部历史(2015→今)评分/排名,可收藏/分享; 浮窗为快视图。</div>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  MODAL=ov;
+  ov.addEventListener('click', function(e){ if (e.target===ov) closeModal(); });
+  document.getElementById('imClose').onclick=closeModal;
+  document.getElementById('imThs').onclick=function(){ if (MODAL && MODAL.dataset.code)
+    window.open('http://q.10jqka.com.cn/thshy/detail/code/' + MODAL.dataset.code + '/', '_blank'); };
+  document.getElementById('imNewPage').onclick=function(){ if (MODAL && MODAL.dataset.code) openSubPage(MODAL.dataset.code); };
+  document.addEventListener('keydown', function(e){ if (e.key==='Escape') closeModal(); });
+}
+function closeModal(){ if (MODAL) MODAL.style.display='none'; }
 
+// ═══ v2 浮窗: THS行业指数日线K线(交互) + 评分排名副图 ═══
+var IMK = null;        // {rows:[{d,o,h,l,c,v,a}], view:{i0,i1}, drag, cross}
+function imFetchK(code, cb){
+  if (IMK && IMK.code === code) { cb(); return; }
+  fetch('ths_kline/' + code + '.json?_=' + Date.now())
+  .then(function(r){ return r.json(); })
+  .then(function(j){
+    var rows = (j.rows||[]).map(function(p){ return {d:String(p[0]), o:p[1], h:p[2], l:p[3], c:p[4], v:p[5], a:p[6]}; });
+    IMK = { code: code, rows: rows, view: { i0: Math.max(0, rows.length-260), i1: rows.length } };
+    cb();
+  })
+  .catch(function(e){ IMK = null; cb(); });
+}
+function imDrawK(){
+  var cv = document.getElementById('imCanvas'); if (!cv || !IMK || !IMK.rows.length) return;
+  var W = cv.parentElement.clientWidth - 4, H = 380;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio; cv.style.height = H+'px';
+  var ctx = cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,W,H);
+  var rows = IMK.rows, vw = IMK.view;
+  var L = 10, R = W-64, T = 10, B = H-58;         // 右侧64给价格轴, 底部给日期+量
+  var n = Math.max(2, vw.i1 - vw.i0);
+  var vis = rows.slice(vw.i0, vw.i1);
+  var hi = -1e18, lo = 1e18;
+  vis.forEach(function(r){ if (r.h>hi) hi=r.h; if (r.l<lo) lo=r.l; });
+  if (hi<=lo){ hi=lo+1; }
+  var pad = (hi-lo)*0.06; hi+=pad; lo-=pad;
+  var vMax = 0; vis.forEach(function(r){ if (r.v>vMax) vMax = r.v; });
+  function X(i){ return L + (i - vw.i0 + 0.5) * (R-L)/n; }
+  function Y(p){ return T + (hi - p)/(hi - lo) * (B-T); }
+  // 网格+价格轴
+  ctx.strokeStyle = '#21262d'; ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  for (var g=0; g<=4; g++){
+    var p = lo + (hi-lo)*g/4, y = Y(p);
+    ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(R,y); ctx.stroke();
+    ctx.fillText(p.toFixed(0), R+6, y+3);
+  }
+  // 量柱区 (B..H-24)
+  var vB = H-24, vT = B+6;
+  ctx.fillStyle = '#30363d'; ctx.fillRect(L, vT, R-L, vB-vT);
+  var bw = Math.max(1, (R-L)/n * 0.7);
+  vis.forEach(function(r, k){
+    var x = X(vw.i0+k), up = r.c >= r.o;
+    ctx.fillStyle = up ? '#3fb95055' : '#f8514955';
+    var vh = vMax ? (r.v/vMax)*(vB-vT) : 0;
+    ctx.fillRect(x-bw/2, vB-vh, bw, vh);
+  });
+  // K线
+  vis.forEach(function(r, k){
+    var x = X(vw.i0+k), up = r.c >= r.o;
+    var col = up ? '#3fb950' : '#f85149';
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, Y(r.h)); ctx.lineTo(x, Y(r.l)); ctx.stroke();
+    var yo = Y(r.o), yc = Y(r.c);
+    var top = Math.min(yo,yc), hgt = Math.max(1, Math.abs(yc-yo));
+    if (up) { ctx.strokeStyle = col; ctx.strokeRect(x-bw/2, top, bw, hgt); }
+    else ctx.fillRect(x-bw/2, top, bw, hgt);
+  });
+  // MA20/60
+  [[20,'#d29922'],[60,'#a371f7']].forEach(function(ma){
+    var N=ma[0]; ctx.strokeStyle=ma[1]; ctx.lineWidth=1.2; ctx.beginPath(); var started=false;
+    for (var i=vw.i0; i<vw.i1; i++){
+      if (i < N-1) continue;
+      var s=0; for (var k2=i-N+1;k2<=i;k2++) s += rows[k2].c;
+      var y = Y(s/N);
+      if (!started){ ctx.moveTo(X(i),y); started=true; } else ctx.lineTo(X(i),y);
+    }
+    ctx.stroke();
+  });
+  // 日期轴
+  ctx.fillStyle='#8b949e'; ctx.textAlign='center';
+  for (var t=0; t<=4; t++){
+    var i = vw.i0 + Math.floor(t*(n-1)/4);
+    if (rows[i]) ctx.fillText(rows[i].d.slice(0,4)+'-'+rows[i].d.slice(4,6)+'-'+rows[i].d.slice(6), X(i), H-8);
+  }
+  // 图例
+  ctx.textAlign='left';
+  ctx.fillStyle='#d29922'; ctx.fillText('MA20', L+6, T+10);
+  ctx.fillStyle='#a371f7'; ctx.fillText('MA60', L+50, T+10);
+  ctx.fillStyle='#8b949e';
+  var lastv = rows[vw.i1-1];
+  ctx.fillText('共'+rows.length+'日 显示'+n+'日 | 最新 '+lastv.d+' 收 '+lastv.c.toFixed(2), L+100, T+10);
+  // 十字线
+  if (IMK.cross){
+    var cx = IMK.cross.x, cy = IMK.cross.y;
+    ctx.strokeStyle='#58a6ff88'; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(cx,T); ctx.lineTo(cx,vB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(L,cy); ctx.lineTo(R,cy); ctx.stroke(); ctx.setLineDash([]);
+    var i = Math.round(vw.i0 + (cx-L)/(R-L)*n - 0.5);
+    if (i>=vw.i0 && i<vw.i1){
+      var r = rows[i];
+      var info = r.d+' O:'+r.o.toFixed(2)+' H:'+r.h.toFixed(2)+' L:'+r.l.toFixed(2)+' C:'+r.c.toFixed(2)+' 量:'+(r.v/1e8).toFixed(2)+'亿';
+      ctx.font='11px sans-serif';
+      var tw = ctx.measureText(info).width;
+      ctx.fillStyle='#161b22ee'; ctx.fillRect(L+4, T+2, tw+12, 18);
+      ctx.fillStyle='#e6edf3'; ctx.fillText(info, L+10, T+15);
+      // 副图同步高亮日期
+      IMK.crossIdx = i;
+    }
+  }
+  imDrawSub();
+}
+function imDrawSub(){
+  var cv = document.getElementById('imCanvas2'); if (!cv || !TIER || !IMK || !IMK.rows.length) return;
+  var W = cv.parentElement.clientWidth - 4, H = 190;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio; cv.style.height = H+'px';
+  var ctx = cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,W,H);
+  var code = IMK.code, ser = TIER.series[code] || [];
+  if (!ser.length) return;
+  var d2i = {}; TIER.dates.forEach(function(d,i){ d2i[d]=i; });
+  // 副图区间=K线视窗(随动): 找视窗首尾日在评分序列中的索引
+  var d0 = IMK.rows[IMK.view.i0].d, d1 = IMK.rows[IMK.view.i1-1].d;
+  var k0 = d2i[d0], k1 = d2i[d1];
+  if (k0 == null || k1 == null || k1 <= k0){ // 评分序列日期对不上时退化: 取末尾同长度
+    k0 = Math.max(0, ser.length - (IMK.view.i1 - IMK.view.i0)); k1 = ser.length - 1;
+  }
+  var vis = ser.slice(k0, k1+1);
+  var L = 46, R = W-46, T = 12, B = H-42;          // 底部42px给bar
+  var ss = vis.map(function(x){ return x.s; }), rs = vis.map(function(x){ return x.r; });
+  var smin = Math.min.apply(null, ss.concat([0])), smax = Math.max.apply(null, ss.concat([0]));
+  var sp = (smax-smin)*0.08; smax+=sp; smin-=sp;
+  function XS(k){ return L + (k-k0)/Math.max(k1-k0,1) * (R-L); }
+  function YS(v){ return B - (v-smin)/(smax-smin||1) * (B-T); }
+  function YR(r){ return T + (r-1)/89 * (B-T); }   // 排名反向: 顶部=1
+  // 网格
+  ctx.strokeStyle = '#21262d'; ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif';
+  [0,.5,1].forEach(function(f){ var y=T+f*(B-T); ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke(); });
+  ctx.textAlign='right';
+  ctx.fillText(smax.toFixed(2), L-5, T+8); ctx.fillText(smin.toFixed(2), L-5, B);
+  ctx.textAlign='left'; ctx.fillText('1', R+5, T+8); ctx.fillText('90', R+5, B);
+  // 0线
+  if (0>smin && 0<smax){ ctx.strokeStyle='#30363d'; ctx.setLineDash([2,3]); ctx.beginPath();ctx.moveTo(L,YS(0));ctx.lineTo(R,YS(0));ctx.stroke();ctx.setLineDash([]); }
+  // 排名(右轴, 紫虚线, 反向)
+  ctx.strokeStyle = '#a371f7'; ctx.lineWidth = 1.4; ctx.setLineDash([4,3]);
+  ctx.beginPath();
+  vis.forEach(function(x,k){ var y=YR(x.r); if(k)ctx.lineTo(XS(k0+k),y); else ctx.moveTo(XS(k0+k),y); });
+  ctx.stroke(); ctx.setLineDash([]);
+  // 评分(左轴, 蓝实线)
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  vis.forEach(function(x,k){ var y=YS(x.s); if(k)ctx.lineTo(XS(k0+k),y); else ctx.moveTo(XS(k0+k),y); });
+  ctx.stroke();
+  // 最新点标注
+  var last = vis[vis.length-1];
+  ctx.fillStyle = '#58a6ff'; ctx.beginPath(); ctx.arc(XS(k1), YS(last.s), 3.5, 0, 7); ctx.fill();
+  // 十字线联动: K线crossIdx映射到副图竖线
+  if (IMK.crossIdx != null && IMK.crossIdx >= IMK.view.i0 && IMK.crossIdx < IMK.view.i1){
+    var cd = IMK.rows[IMK.crossIdx].d, ck = d2i[cd];
+    if (ck != null && ck >= k0 && ck <= k1){
+      ctx.strokeStyle = '#58a6ff88'; ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(XS(ck),T); ctx.lineTo(XS(ck),B); ctx.stroke(); ctx.setLineDash([]);
+      var cv2 = ser[ck];
+      ctx.fillStyle = '#e6edf3'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(cd.slice(0,4)+'-'+cd.slice(4,6)+'-'+cd.slice(6)+'  评分 '+cv2.s.toFixed(3)+'  排名#'+cv2.r, L+6, T+14);
+    }
+  }
+  // 底部随动热力bar: 视窗内逐日评分五档色条(与tierColor同色道)
+  var barT = B+8, barB = H-14, n = vis.length;
+  var bw = (R-L)/Math.max(n,1);
+  vis.forEach(function(x,k){
+    var col = tierColor(x.s);
+    ctx.fillStyle = col[0];
+    var mid = T + (barB-barT)/2 + ((0.5 - (x.s+0.5)) * (barB-barT)); // 简单纵向位置=评分强弱
+    ctx.fillRect(L + k*bw, barT, Math.max(bw-0.3,0.5), barB-barT);
+  });
+  // bar 上叠画排名曲线微缩(可选省略) — bar两端标注
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign='left';
+  ctx.fillText('热力bar(色=当日评分档位, 随视窗)', L, H-3);
+  ctx.textAlign='right';
+  ctx.fillText('蓝=评分(左)  紫=排名(右,反向)', R, H-3);
+}
+function imBindK(){
+  var cv = document.getElementById('imCanvas'); if (!cv || cv.__bound) return; cv.__bound = true;
+  function rect(){ return cv.getBoundingClientRect(); }
+  cv.addEventListener('wheel', function(e){
+    e.preventDefault(); if (!IMK) return;
+    var r = rect(), mx = e.clientX - r.left;
+    var rows = IMK.rows, n = IMK.view.i1 - IMK.view.i0;
+    var frac = Math.max(0, Math.min(1, (mx - 10) / (r.width - 74)));
+    var ci = IMK.view.i0 + Math.floor(frac * n);
+    var f = e.deltaY > 0 ? 1.25 : 0.8;
+    var n2 = Math.max(20, Math.min(rows.length, Math.round(n * f)));
+    var i0 = Math.max(0, Math.min(rows.length - n2, Math.round(ci - frac * n2)));
+    IMK.view = { i0: i0, i1: i0 + n2 };
+    imDrawK();
+  }, { passive:false });
+  cv.addEventListener('mousedown', function(e){ if (!IMK) return; IMK.drag = { x: e.clientX, v0: IMK.view.i0, v1: IMK.view.i1 }; });
+  window.addEventListener('mousemove', function(e){
+    if (!IMK) return;
+    var r = rect();
+    if (IMK.drag){
+      var n = IMK.drag.v1 - IMK.drag.v0;
+      var dIdx = Math.round((e.clientX - IMK.drag.x) / (r.width - 74) * n);
+      var i0 = Math.max(0, Math.min(IMK.rows.length - n, IMK.drag.v0 - dIdx));
+      IMK.view = { i0: i0, i1: i0 + n }; imDrawK();
+    } else {
+      IMK.cross = { x: e.clientX - r.left, y: e.clientY - r.top }; imDrawK();
+    }
+  });
+  window.addEventListener('mouseup', function(){ if (IMK) IMK.drag = null; });
+  cv.addEventListener('mouseleave', function(){ if (IMK){ IMK.cross=null; imDrawK(); } });
+  cv.addEventListener('dblclick', function(){
+    if (IMK) { IMK.view = { i0: Math.max(0, IMK.rows.length-260), i1: IMK.rows.length }; imDrawK(); }
+  });
+}
+function drawIndModal(code, name){
+  ensureModalDom();
+  MODAL.dataset.code = code;
+  MODAL.style.display = 'flex';
+  document.getElementById('imTitle').textContent = name + ' (' + code + ')';
+  document.getElementById('imSub').textContent = 'THS 行业指数日线';
+  imBindK();
+  imFetchK(code, function(){
+    if (IMK && IMK.rows.length) imDrawK();
+    else { var cv=document.getElementById('imCanvas'); var ctx=cv.getContext('2d');
+      ctx.fillStyle='#8b949e'; ctx.font='13px sans-serif'; ctx.fillText('ths_kline/'+code+'.json 加载失败', 20, 30); }
+    imDrawSub();
+    // 指标卡(评分体系)
+    var ser = (TIER && TIER.series[code]) || [];
+    if (ser.length){
+      var last = ser[ser.length-1];
+      var ss = ser.map(function(x){ return x.s; });
+      var m5 = ss.slice(-5).reduce(function(a,b){return a+b;},0)/Math.min(5,ss.length);
+      var m20 = ss.slice(-20).reduce(function(a,b){return a+b;},0)/Math.min(20,ss.length);
+      var res = tierColor(last.s);
+      // 最新K线涨跌
+      var kinfo = IMK && IMK.rows.length ? (function(r){ var prev=IMK.rows[IMK.rows.length-2];
+        return { c:r.c, chg:(prev? (r.c/prev.c-1)*100 : null) }; })(IMK.rows[IMK.rows.length-1]) : null;
+      var cards = [
+        ['指数收盘', kinfo? kinfo.c.toFixed(2) : '—', '#e6edf3', kinfo&&kinfo.chg!=null? ((kinfo.chg>=0?'+':'')+kinfo.chg.toFixed(2)+'%') : ''],
+        ['最新评分', last.s.toFixed(3), res[0], '档位 '+res[1]+' · 排名#'+last.r],
+        ['5日均分', m5.toFixed(3), '#79c0ff', '20日均 '+m20.toFixed(3)],
+        ['评分区间', Math.min.apply(null,ss).toFixed(2)+' ~ '+Math.max.apply(null,ss).toFixed(2), '#d2a8ff', '全期'+ss.length+'日'],
+      ];
+      document.getElementById('imCards').innerHTML = cards.map(function(c){
+        return '<div class="imcv"><div class="l">'+c[0]+'</div><div class="v" style="color:'+c[2]+';">'+c[1]+'</div><div class="s">'+c[3]+'</div></div>';
+      }).join('');
+    }
+  });
+}
+
+// 子页面: 数据URI生成独立HTML(评分/排名全历史+指标表+THS链接)
+function openSubPage(code){
+  var name=(TIER.names && TIER.names[code]) || code;
+  var ser=TIER.series[code]||[];
+  var dates=TIER.dates;
+  var win=window.open('', '_blank');
+  if (!win){ alert('弹窗被拦截, 请允许弹窗'); return; }
+  var last=ser[ser.length-1]||{};
+  var ss=ser.map(function(x){return x.s;});
+  var m5 = ss.slice(-5).reduce(function(a,b){return a+b;},0)/Math.min(5,ss.length);
+  var m20= ss.slice(-20).reduce(function(a,b){return a+b;},0)/Math.min(20,ss.length);
+  var m60= ss.slice(-60).reduce(function(a,b){return a+b;},0)/Math.min(60,ss.length);
+  var best = ss.reduce(function(a,b){return b>a?b:a;},-9);
+  var worst= ss.reduce(function(a,b){return b<a?b:a;},9);
+  var rowsHtml=ser.slice(-60).reverse().map(function(x){
+    return '<tr><td>'+fmtDate(String(dates[x.d]))+'</td><td>'+x.s.toFixed(3)+'</td><td>'+x.r+'</td></tr>';
+  }).join('');
+  win.document.write(
+'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+name+' · 行业下钻子页面</title>'+
+'<style>body{background:#0d1117;color:#c9d1d9;font:14px/1.5 "PingFang SC","Microsoft YaHei",sans-serif;margin:0;padding:24px;}'+
+'h1{font-size:20px;color:#e6edf3;margin:0 0 4px;} .sub{color:#8b949e;font-size:12px;margin-bottom:16px;}'+
+'table{border-collapse:collapse;width:100%;max-width:720px;} th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:13px;}'+
+'th{background:#161b22;color:#8b949e;position:sticky;top:0;} tr:nth-child(even){background:#161b2288;}'+
+'.card{display:inline-block;background:#161b22;border:1px solid #30163d;border:1px solid #30363d;border-radius:8px;padding:10px 14px;margin:0 10px 10px 0;}'+
+'.cv{color:#8b949e;font-size:11px;} .vv{font-size:20px;font-weight:600;} a{color:#58a6ff;}</style></head><body>'+
+'<h1>'+name+' <span style="color:#8b949e;font-size:14px;">('+code+')</span></h1>'+
+'<div class="sub">行业下钻子页面 · 全历史 '+ser.length+' 个交易日 · 生成于 '+new Date().toLocaleString()+' · <a href="http://q.10jqka.com.cn/thshy/detail/code/'+code+'/" target="_blank">THS 行业页 ↗</a></div>'+
+'<div>'+
+'<span class="card"><div class="cv">最新评分</div><div class="vv">'+(last.s!=null?last.s.toFixed(3):'—')+'</div><div class="cv">排名 #'+(last.r||'—')+'/90</div></span>'+
+'<span class="card"><div class="cv">5日均分</div><div class="vv">'+m5.toFixed(3)+'</div><div class="cv">20日均 '+m20.toFixed(3)+' · 60日均 '+m60.toFixed(3)+'</div></span>'+
+'<span class="card"><div class="cv">20日均分</div><div class="vv">'+m20.toFixed(3)+'</div><div class="cv">60日均 '+m60.toFixed(3)+'</div></span>'+
+'</div>'+
+'<h3 style="color:#e6edf3;">近 60 个交易日</h3>'+
+'<table><tr><th>日期</th><th>评分</th><th>排名</th></tr>'+rowsHtml+'</table>'+
+'</body></html>');
+  win.document.close();
+}
+</script>
+<script>
 // ── boot ──
 fetch('stock_heat.json?_=' + Date.now())
 .then(function(r){ return r.json(); })
@@ -684,7 +974,7 @@ fetch('stock_heat.json?_=' + Date.now())
   var canvas = document.getElementById('rowTierCanvas');
   canvas.addEventListener('click', function() {
     if (CUR && CUR.ths_code)
-      window.open('http://q.10jqka.com.cn/thshy/detail/code/' + CUR.ths_code + '/', '_blank');
+      drawIndModal(CUR.ths_code, CUR.industry || (TIER.names && TIER.names[CUR.ths_code]) || CUR.ths_code);
   });
 })();
 

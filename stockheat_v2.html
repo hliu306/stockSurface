@@ -602,9 +602,11 @@ function ensureModalDom(){
         '<button id="imClose" style="background:#21262d;color:#f85149;border:1px solid #30363d;border-r'+'adius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">✕ 关闭</button>'+
       '</div>'+
       '<div style="padding:16px 18px;">'+
-        '<canvas id="imCanvas" style="width:100%;height:300px;"></canvas>'+
+        '<canvas id="imCanvas" style="width:100%;height:380px;cursor:crosshair;"></canvas>'+
+        '<div id="imHint" style="color:#8b949e;font-size:11px;margin:4px 0 10px;">滚轮缩放 · 拖拽平移 · 双击复位 · 十字线读值 (THS 行业指数日线 2015→今)</div>'+
+        '<canvas id="imCanvas2" style="width:100%;height:140px;"></canvas>'+
         '<div id="imCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;"></div>'+
-        '<div class="note" style="margin-top:12px;">子页面为独立 HTML,含全部历史(2015→今)评分/排名/ER20/成交占比/宽度,可收藏/分享; 浮窗为快视图。</div>'+
+        '<div class="note" style="margin-top:12px;">子页面为独立 HTML,含全部历史(2015→今)评分/排名,可收藏/分享; 浮窗为快视图。</div>'+
       '</div>'+
     '</div>';
   document.body.appendChild(ov);
@@ -618,82 +620,209 @@ function ensureModalDom(){
 }
 function closeModal(){ if (MODAL) MODAL.style.display='none'; }
 
-// 浮窗图表: 近250日 评分(左轴) + 排名(右轴, 反向)
-function drawIndModal(code, name){
-  ensureModalDom();
-  MODAL.dataset.code=code;
-  MODAL.style.display='flex';
-  document.getElementById('imTitle').textContent = name + ' (' + code + ')';
-  document.getElementById('imSub').textContent = '近一年 · 评分与排名';
-  var cv=document.getElementById('imCanvas');
-  var W=cv.parentElement.clientWidth-0, H=300;
-  cv.width=W*devicePixelRatio; cv.height=H*devicePixelRatio;
-  cv.style.height=H+'px';
-  var ctx=cv.getContext('2d'); ctx.scale(devicePixelRatio,devicePixelRatio);
-  ctx.clearRect(0,0,W,H);
-  var L=46,R=W-46,T=14,B=H-24;
-  var ser=TIER.series[code]||[];
-  var tail=ser.slice(-250);
-  if (!tail.length){ ctx.fillStyle='#8b949e'; ctx.fillText('无数据',L+10,T+20); return; }
-  var ss=tail.map(function(x){return x.s;}), rs=tail.map(function(x){return x.r;});
-  var smin=Math.min.apply(null,ss), smax=Math.max.apply(null,ss);
-  var srange=Math.max(smax-smin,0.001);
-  var d0=TIER.dates[TIER.dates.length-tail.length];
-  function X(i){ return L + i/(tail.length-1)*(R-L); }
-  function Ys(v){ return B - (v-smin)/srange*(B-T); }
-  function Yr(r){ return T + (r-1)/89*(B-T); }
-  // 网格
-  ctx.strokeStyle='#21262d'; ctx.lineWidth=1;
-  [0,.25,.5,.75,1].forEach(function(f){
-    var y=T+f*(B-T); ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke();
-  });
-  // 排名带(右轴, 反向: 顶部=排名1)
-  ctx.strokeStyle='#8957e5'; ctx.setLineDash([4,3]); ctx.lineWidth=1.5;
-  ctx.beginPath();
-  tail.forEach(function(x,i){ var y=Yr(x.r); if(i)ctx.lineTo(X(i),y); else ctx.moveTo(X(i),y); });
-  ctx.stroke(); ctx.setLineDash([]);
-  // 评分曲线(左轴)
-  ctx.strokeStyle='#58a6ff'; ctx.lineWidth=2;
-  ctx.beginPath();
-  tail.forEach(function(x,i){ var y=Ys(x.s); if(i)ctx.lineTo(X(i),y); else ctx.moveTo(X(i),y); });
-  ctx.stroke();
-  // 0线(若在范围内)
-  if (0>=smin && 0<=smax){
-    ctx.strokeStyle='#30363d'; ctx.setLineDash([2,3]);
-    ctx.beginPath();ctx.moveTo(L,Ys(0));ctx.lineTo(R,Ys(0));ctx.stroke();ctx.setLineDash([]);
+// ═══ v2 浮窗: THS行业指数日线K线(交互) + 评分排名副图 ═══
+var IMK = null;        // {rows:[{d,o,h,l,c,v,a}], view:{i0,i1}, drag, cross}
+function imFetchK(code, cb){
+  if (IMK && IMK.code === code) { cb(); return; }
+  fetch('ths_kline/' + code + '.json?_=' + Date.now())
+  .then(function(r){ return r.json(); })
+  .then(function(j){
+    var rows = (j.rows||[]).map(function(p){ return {d:String(p[0]), o:p[1], h:p[2], l:p[3], c:p[4], v:p[5], a:p[6]}; });
+    IMK = { code: code, rows: rows, view: { i0: Math.max(0, rows.length-260), i1: rows.length } };
+    cb();
+  })
+  .catch(function(e){ IMK = null; cb(); });
+}
+function imDrawK(){
+  var cv = document.getElementById('imCanvas'); if (!cv || !IMK || !IMK.rows.length) return;
+  var W = cv.parentElement.clientWidth - 4, H = 380;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio; cv.style.height = H+'px';
+  var ctx = cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,W,H);
+  var rows = IMK.rows, vw = IMK.view;
+  var L = 10, R = W-64, T = 10, B = H-58;         // 右侧64给价格轴, 底部给日期+量
+  var n = Math.max(2, vw.i1 - vw.i0);
+  var vis = rows.slice(vw.i0, vw.i1);
+  var hi = -1e18, lo = 1e18;
+  vis.forEach(function(r){ if (r.h>hi) hi=r.h; if (r.l<lo) lo=r.l; });
+  if (hi<=lo){ hi=lo+1; }
+  var pad = (hi-lo)*0.06; hi+=pad; lo-=pad;
+  var vMax = 0; vis.forEach(function(r){ if (r.v>vMax) vMax = r.v; });
+  function X(i){ return L + (i - vw.i0 + 0.5) * (R-L)/n; }
+  function Y(p){ return T + (hi - p)/(hi - lo) * (B-T); }
+  // 网格+价格轴
+  ctx.strokeStyle = '#21262d'; ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  for (var g=0; g<=4; g++){
+    var p = lo + (hi-lo)*g/4, y = Y(p);
+    ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(R,y); ctx.stroke();
+    ctx.fillText(p.toFixed(0), R+6, y+3);
   }
-  // 轴标
-  ctx.fillStyle='#8b949e'; ctx.font='11px sans-serif'; ctx.textAlign='right';
-  ctx.fillText('评分',L-6,T+10);
-  ctx.textAlign='left'; ctx.fillText('排名1↑',R+4,T+10); ctx.fillText('90↓',R+4,B);
-  ctx.textAlign='center'; ctx.fillText(fmtDate(String(d0)),L+18,H-8); ctx.fillText(fmtDate(String(TIER.dates[TIER.dates.length-1])),R-24,H-8);
+  // 量柱区 (B..H-24)
+  var vB = H-24, vT = B+6;
+  ctx.fillStyle = '#30363d'; ctx.fillRect(L, vT, R-L, vB-vT);
+  var bw = Math.max(1, (R-L)/n * 0.7);
+  vis.forEach(function(r, k){
+    var x = X(vw.i0+k), up = r.c >= r.o;
+    ctx.fillStyle = up ? '#3fb95055' : '#f8514955';
+    var vh = vMax ? (r.v/vMax)*(vB-vT) : 0;
+    ctx.fillRect(x-bw/2, vB-vh, bw, vh);
+  });
+  // K线
+  vis.forEach(function(r, k){
+    var x = X(vw.i0+k), up = r.c >= r.o;
+    var col = up ? '#3fb950' : '#f85149';
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, Y(r.h)); ctx.lineTo(x, Y(r.l)); ctx.stroke();
+    var yo = Y(r.o), yc = Y(r.c);
+    var top = Math.min(yo,yc), hgt = Math.max(1, Math.abs(yc-yo));
+    if (up) { ctx.strokeStyle = col; ctx.strokeRect(x-bw/2, top, bw, hgt); }
+    else ctx.fillRect(x-bw/2, top, bw, hgt);
+  });
+  // MA20/60
+  [[20,'#d29922'],[60,'#a371f7']].forEach(function(ma){
+    var N=ma[0]; ctx.strokeStyle=ma[1]; ctx.lineWidth=1.2; ctx.beginPath(); var started=false;
+    for (var i=vw.i0; i<vw.i1; i++){
+      if (i < N-1) continue;
+      var s=0; for (var k2=i-N+1;k2<=i;k2++) s += rows[k2].c;
+      var y = Y(s/N);
+      if (!started){ ctx.moveTo(X(i),y); started=true; } else ctx.lineTo(X(i),y);
+    }
+    ctx.stroke();
+  });
+  // 日期轴
+  ctx.fillStyle='#8b949e'; ctx.textAlign='center';
+  for (var t=0; t<=4; t++){
+    var i = vw.i0 + Math.floor(t*(n-1)/4);
+    if (rows[i]) ctx.fillText(rows[i].d.slice(0,4)+'-'+rows[i].d.slice(4,6)+'-'+rows[i].d.slice(6), X(i), H-8);
+  }
   // 图例
   ctx.textAlign='left';
-  ctx.fillStyle='#58a6ff'; ctx.fillText('— 评分(左)',L+8,T+10);
-  ctx.fillStyle='#8957e5'; ctx.fillText('--- 排名(右,反向)',L+88,T+10);
-  // 最新点
-  var lx=X(tail.length-1), ly=Ys(ss[ss.length-1]);
-  ctx.fillStyle='#58a6ff'; ctx.beginPath();ctx.arc(lx,ly,4,0,7);ctx.fill();
-  ctx.fillStyle='#e6edf3'; ctx.fillText('  '+ss[ss.length-1].toFixed(3),lx+8,ly+3);
-  // 指标卡
-  var last=tail[tail.length-1];
-  var m5 = ss.slice(-5).reduce(function(a,b){return a+b;},0)/Math.min(5,ss.length);
-  var m20= ss.slice(-20).reduce(function(a,b){return a+b;},0)/Math.min(20,ss.length);
-  var r5 = rs.slice(-5).reduce(function(a,b){return a+b;},0)/Math.min(5,rs.length);
-  var res=tierColor(last.s);
-  var cards=[
-    ['最新评分', last.s.toFixed(3), res[0], '档位 '+res[1]],
-    ['排名(90)', '#'+last.r, last.r<=15?'#3fb950':(last.r>=75?'#f85149':'#8b949e'), '5日均 #'+r5.toFixed(0)],
-    ['5日均分', m5.toFixed(3), '#79c0ff', '20日均 '+m20.toFixed(3)],
-    ['年度区间', smin.toFixed(2)+' ~ '+smax.toFixed(2), '#d2a8ff', '250日'],
-  ];
-  var host=document.getElementById('imCards');
-  host.innerHTML=cards.map(function(c){
-    return '<div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px;">'+
-      '<div style="color:#8b949e;font-size:11px;">'+c[0]+'</div>'+
-      '<div style="font-size:20px;font-weight:600;color:'+c[2]+';margin:2px 0;">'+c[1]+'</div>'+
-      '<div style="color:#8b949e;font-size:11px;">'+c[3]+'</div></div>';
-  }).join('');
+  ctx.fillStyle='#d29922'; ctx.fillText('MA20', L+6, T+10);
+  ctx.fillStyle='#a371f7'; ctx.fillText('MA60', L+50, T+10);
+  ctx.fillStyle='#8b949e';
+  var lastv = rows[vw.i1-1];
+  ctx.fillText('共'+rows.length+'日 显示'+n+'日 | 最新 '+lastv.d+' 收 '+lastv.c.toFixed(2), L+100, T+10);
+  // 十字线
+  if (IMK.cross){
+    var cx = IMK.cross.x, cy = IMK.cross.y;
+    ctx.strokeStyle='#58a6ff88'; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(cx,T); ctx.lineTo(cx,vB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(L,cy); ctx.lineTo(R,cy); ctx.stroke(); ctx.setLineDash([]);
+    var i = Math.round(vw.i0 + (cx-L)/(R-L)*n - 0.5);
+    if (i>=vw.i0 && i<vw.i1){
+      var r = rows[i];
+      var info = r.d+' O:'+r.o.toFixed(2)+' H:'+r.h.toFixed(2)+' L:'+r.l.toFixed(2)+' C:'+r.c.toFixed(2)+' 量:'+(r.v/1e8).toFixed(2)+'亿';
+      ctx.font='11px sans-serif';
+      var tw = ctx.measureText(info).width;
+      ctx.fillStyle='#161b22ee'; ctx.fillRect(L+4, T+2, tw+12, 18);
+      ctx.fillStyle='#e6edf3'; ctx.fillText(info, L+10, T+15);
+      // 副图同步高亮日期
+      IMK.crossIdx = i;
+    }
+  }
+  imDrawSub();
+}
+function imDrawSub(){
+  var cv = document.getElementById('imCanvas2'); if (!cv || !TIER || !IMK) return;
+  var W = cv.parentElement.clientWidth - 4, H = 140;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio; cv.style.height = H+'px';
+  var ctx = cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,W,H);
+  var code = IMK.code, ser = TIER.series[code] || [];
+  var d2i = {}; TIER.dates.forEach(function(d,i){ d2i[d]=i; });
+  // 评分曲线全期浅色 + 视窗内加粗
+  var L=46, R=W-46, T=10, B=H-22;
+  var ss = ser.map(function(x){ return x.s; });
+  var smin = Math.min.apply(null, ss.concat([0])), smax = Math.max.apply(null, ss.concat([0]));
+  function XS(k){ return L + k/(Math.max(ser.length-1,1)) * (R-L); }
+  function YS(v){ return B - (v-smin)/(smax-smin||1) * (B-T); }
+  ctx.strokeStyle = '#30363d';
+  [smin,(smin+smax)/2,smax].forEach(function(v){ var y=YS(v); ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke(); });
+  // 全期
+  ctx.strokeStyle = '#58a6ff44'; ctx.lineWidth=1; ctx.beginPath();
+  ser.forEach(function(x,k){ var y=YS(x.s); if(k)ctx.lineTo(XS(k),y); else ctx.moveTo(XS(k),y); });
+  ctx.stroke();
+  // K线视窗映射到副图高亮区
+  var d0 = IMK.rows[IMK.view.i0].d, d1 = IMK.rows[Math.min(IMK.view.i1,IMK.rows.length)-1].d;
+  var k0 = d2i[d0], k1 = d2i[d1];
+  if (k0!=null && k1!=null){
+    ctx.fillStyle = '#58a6ff11'; ctx.fillRect(XS(k0), T, XS(k1)-XS(k0), B-T);
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth=1.6; ctx.beginPath();
+    for (var k=k0;k<=k1;k++){ var y=YS(ser[k].s); if(k>k0)ctx.lineTo(XS(k),y); else ctx.moveTo(XS(k),y); }
+    ctx.stroke();
+  }
+  ctx.fillStyle='#8b949e'; ctx.font='10px sans-serif'; ctx.textAlign='right';
+  ctx.fillText(smax.toFixed(2), L-5, T+8); ctx.fillText(smin.toFixed(2), L-5, B);
+  ctx.textAlign='left'; ctx.fillText('行业评分(全期浅·视窗亮) 2015→今', L+6, T+8);
+}
+function imBindK(){
+  var cv = document.getElementById('imCanvas'); if (!cv || cv.__bound) return; cv.__bound = true;
+  function rect(){ return cv.getBoundingClientRect(); }
+  cv.addEventListener('wheel', function(e){
+    e.preventDefault(); if (!IMK) return;
+    var r = rect(), mx = e.clientX - r.left;
+    var rows = IMK.rows, n = IMK.view.i1 - IMK.view.i0;
+    var frac = Math.max(0, Math.min(1, (mx - 10) / (r.width - 74)));
+    var ci = IMK.view.i0 + Math.floor(frac * n);
+    var f = e.deltaY > 0 ? 1.25 : 0.8;
+    var n2 = Math.max(20, Math.min(rows.length, Math.round(n * f)));
+    var i0 = Math.max(0, Math.min(rows.length - n2, Math.round(ci - frac * n2)));
+    IMK.view = { i0: i0, i1: i0 + n2 };
+    imDrawK();
+  }, { passive:false });
+  cv.addEventListener('mousedown', function(e){ if (!IMK) return; IMK.drag = { x: e.clientX, v0: IMK.view.i0, v1: IMK.view.i1 }; });
+  window.addEventListener('mousemove', function(e){
+    if (!IMK) return;
+    var r = rect();
+    if (IMK.drag){
+      var n = IMK.drag.v1 - IMK.drag.v0;
+      var dIdx = Math.round((e.clientX - IMK.drag.x) / (r.width - 74) * n);
+      var i0 = Math.max(0, Math.min(IMK.rows.length - n, IMK.drag.v0 - dIdx));
+      IMK.view = { i0: i0, i1: i0 + n }; imDrawK();
+    } else {
+      IMK.cross = { x: e.clientX - r.left, y: e.clientY - r.top }; imDrawK();
+    }
+  });
+  window.addEventListener('mouseup', function(){ if (IMK) IMK.drag = null; });
+  cv.addEventListener('mouseleave', function(){ if (IMK){ IMK.cross=null; imDrawK(); } });
+  cv.addEventListener('dblclick', function(){
+    if (IMK) { IMK.view = { i0: Math.max(0, IMK.rows.length-260), i1: IMK.rows.length }; imDrawK(); }
+  });
+}
+function drawIndModal(code, name){
+  ensureModalDom();
+  MODAL.dataset.code = code;
+  MODAL.style.display = 'flex';
+  document.getElementById('imTitle').textContent = name + ' (' + code + ')';
+  document.getElementById('imSub').textContent = 'THS 行业指数日线';
+  imBindK();
+  imFetchK(code, function(){
+    if (IMK && IMK.rows.length) imDrawK();
+    else { var cv=document.getElementById('imCanvas'); var ctx=cv.getContext('2d');
+      ctx.fillStyle='#8b949e'; ctx.font='13px sans-serif'; ctx.fillText('ths_kline/'+code+'.json 加载失败', 20, 30); }
+    imDrawSub();
+    // 指标卡(评分体系)
+    var ser = (TIER && TIER.series[code]) || [];
+    if (ser.length){
+      var last = ser[ser.length-1];
+      var ss = ser.map(function(x){ return x.s; });
+      var m5 = ss.slice(-5).reduce(function(a,b){return a+b;},0)/Math.min(5,ss.length);
+      var m20 = ss.slice(-20).reduce(function(a,b){return a+b;},0)/Math.min(20,ss.length);
+      var res = tierColor(last.s);
+      // 最新K线涨跌
+      var kinfo = IMK && IMK.rows.length ? (function(r){ var prev=IMK.rows[IMK.rows.length-2];
+        return { c:r.c, chg:(prev? (r.c/prev.c-1)*100 : null) }; })(IMK.rows[IMK.rows.length-1]) : null;
+      var cards = [
+        ['指数收盘', kinfo? kinfo.c.toFixed(2) : '—', '#e6edf3', kinfo&&kinfo.chg!=null? ((kinfo.chg>=0?'+':'')+kinfo.chg.toFixed(2)+'%') : ''],
+        ['最新评分', last.s.toFixed(3), res[0], '档位 '+res[1]+' · 排名#'+last.r],
+        ['5日均分', m5.toFixed(3), '#79c0ff', '20日均 '+m20.toFixed(3)],
+        ['评分区间', Math.min.apply(null,ss).toFixed(2)+' ~ '+Math.max.apply(null,ss).toFixed(2), '#d2a8ff', '全期'+ss.length+'日'],
+      ];
+      document.getElementById('imCards').innerHTML = cards.map(function(c){
+        return '<div class="imcv"><div class="l">'+c[0]+'</div><div class="v" style="color:'+c[2]+';">'+c[1]+'</div><div class="s">'+c[3]+'</div></div>';
+      }).join('');
+    }
+  });
 }
 
 // 子页面: 数据URI生成独立HTML(评分/排名全历史+指标表+THS链接)

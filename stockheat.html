@@ -593,10 +593,10 @@ function heatBuildDevia(code){
   if (stat && document.getElementById('metricSel').value === 'devia') stat.textContent = '计算行业偏离DEVI...';
   var K = HEAT_IND_CACHE[code];
   if (!K){
-    fetch('ths_kline/' + code + '.json?_=' + Date.now())
+    fetch('ths_kline_min/' + code + '.json?_=' + Date.now())
     .then(function(r){ return r.json(); })
     .then(function(j){
-      var m = {}; (j.rows||[]).forEach(function(p){ m[String(p[0])] = p[4]; });
+      var m = j.rows ? (function(){ var mm={}; j.rows.forEach(function(p){ mm[String(p[0])]=p[4]; }); return mm; })() : j;
       HEAT_IND_CACHE[code] = m;
       heatBuildDevia(code);
       // 数据到齐重算重画(若当前metric是devia或已开弹窗)
@@ -1103,10 +1103,10 @@ function smBuildDevia(){
   if (!SM_IND_CACHE) SM_IND_CACHE = {};
   var K = SM_IND_CACHE[code];
   if (!K){
-    fetch('ths_kline/' + code + '.json?_=' + Date.now())
+    fetch('ths_kline_min/' + code + '.json?_=' + Date.now())
     .then(function(r){ return r.json(); })
     .then(function(j){
-      var m = {}; (j.rows||[]).forEach(function(p){ m[String(p[0])] = p[4]; });  // date->close
+      var m = j.rows ? (function(){ var mm={}; j.rows.forEach(function(p){ mm[String(p[0])]=p[4]; }); return mm; })() : j;  // 兼容min与全量
       SM_IND_CACHE[code] = m;
       smBuildDevia(); smDraw();   // 拿到后重算重画
     }).catch(function(){});

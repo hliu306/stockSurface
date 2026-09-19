@@ -997,8 +997,67 @@ function smDraw(){
     }
   }
   smDrawCards(st);
-  // 副图隐藏(个股模式不用)
-  var sub = document.getElementById('imCanvas2'); if (sub) sub.style.display = 'none';
+  smDrawBars(st);
+}
+function smDrawBars(st){
+  // 双随动bar(与主图视窗同区间): 上=个股当日涨跌色 | 下=所属行业评分五档色
+  var cv = document.getElementById('imCanvas2'); if (!cv || !SMD) return;
+  cv.style.display = '';
+  var W = cv.parentElement.clientWidth - 4, H = 150;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio; cv.style.height = H+'px';
+  var ctx = cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,W,H);
+  var vw = SMD.view, n = vw.i1 - vw.i0;
+  var L = 10, R = W-64;
+  var rows = [[],[]];  // [0]=个股bar区 [1]=行业bar区
+  var T0 = 14, B0 = 68;   // bar1: 个股
+  var T1 = 78, B1 = 132;  // bar2: 行业
+  var bw = Math.max(1, (R-L)/n - 0.3);
+  // bar1: 个股当日涨跌(红涨绿跌, 与热力图色道一致: 用行业浮窗K线同款红绿)
+  var pMax = 0;
+  for (var i=vw.i0;i<vw.i1;i++){ var pc = st.pct[i]; if (pc!=null && Math.abs(pc)>pMax) pMax = Math.abs(pc); }
+  if (!pMax) pMax = 5;
+  for (var i2=vw.i0;i2<vw.i1;i2++){
+    var pc2 = st.pct[i2]; if (pc2==null) continue;
+    var x = L + (i2-vw.i0)*(R-L)/n;
+    var hgt = Math.abs(pc2)/pMax * (B0-T0)/2;
+    var y0 = (T0+B0)/2;
+    ctx.fillStyle = pc2 >= 0 ? '#f85149' : '#3fb950';
+    if (pc2 >= 0) ctx.fillRect(x, y0-hgt, bw, hgt);
+    else ctx.fillRect(x, y0, bw, hgt);
+  }
+  // bar1 中线+标注
+  ctx.strokeStyle = '#30363d'; ctx.beginPath(); ctx.moveTo(L,(T0+B0)/2); ctx.lineTo(R,(T0+B0)/2); ctx.stroke();
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('个股当日涨跌 ±'+pMax.toFixed(1)+'%满幅', L+4, T0-2);
+  // bar2: 所属行业评分五档色(随动)
+  var code = CUR ? CUR.ths_code : null;
+  var ser = (TIER && code && TIER.series[code]) || [];
+  if (ser.length){
+    var d2i = {}; TIER.dates.forEach(function(d,i){ d2i[d]=i; });
+    for (var i3=vw.i0;i3<vw.i1;i3++){
+      var d = String(st.dates[i3]); var di = d2i[d];
+      if (di == null) continue;
+      // 二分找该日评分(tierVal)
+      var v = tierVal(code, di);
+      if (!v) continue;
+      var x2 = L + (i3-vw.i0)*(R-L)/n;
+      ctx.fillStyle = tierColor(v.s)[0];
+      ctx.fillRect(x2, T1, bw, B1-T1);
+    }
+    ctx.fillStyle = '#8b949e'; ctx.textAlign = 'left';
+    ctx.fillText((CUR?CUR.industry:'行业')+' 评分档位(随动·同热力图色道)', L+4, T1-2);
+  } else {
+    ctx.fillStyle = '#8b949e'; ctx.fillText('行业评分数据未加载', L+4, T1-2);
+  }
+  // 十字线联动竖线
+  if (SMD.crossIdx != null && SMD.crossIdx >= vw.i0 && SMD.crossIdx < vw.i1){
+    var cx = L + (SMD.crossIdx-vw.i0)*(R-L)/n + bw/2;
+    ctx.strokeStyle = '#58a6ff88'; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(cx, T0-4); ctx.lineTo(cx, B1+4); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.fillStyle = '#8b949e'; ctx.textAlign = 'right';
+  ctx.fillText('滚轮/拖拽与主图同步', R, H-4);
 }
 function smDrawCards(st){
   // 指标卡: 最新价/区间涨跌/成交/换手(全期+近20日)

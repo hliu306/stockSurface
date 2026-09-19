@@ -4,21 +4,57 @@
 <meta charset="UTF-8">
 <title>个股热力 · v2 克隆(行业下钻浮动窗试验)</title>
 <style>
-  html,body{margin:0;padding:0;background:#0d1117;color:#c9d1d9;font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100%;}
-  #wrap{padding:16px 18px 40px;}
-  h1{font-size:18px;margin:0 0 4px;color:#e6edf3;}
-  .sub{color:#8b949e;font-size:12px;margin-bottom:14px;}
-  .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:13px;}
-  .bar label{color:#8b949e;}
-  select,input[type=range]{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:3px 8px;}
-  canvas{display:block;}
-  #stockCanvas{cursor:pointer;}
-  #rowTierCanvas{cursor:pointer;}
-  #tip{position:fixed;display:none;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:50;max-width:320px;box-shadow:0 4px 14px rgba(0,0,0,.5);}
-  .panel{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px 14px;margin-bottom:14px;}
-  .panel h2{font-size:15px;margin:0 0 8px;color:#e6edf3;}
-  .note{color:#8b949e;font-size:12px;}
-  #v2badge{display:inline-block;background:#1f6feb33;color:#79c0ff;border:1px solid #1f6feb66;border-radius:4px;padding:1px 8px;font-size:12px;margin-left:8px;}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0a0a14; color:#cdd; font-family:'Segoe UI',system-ui,sans-serif;
+  overflow-x:hidden;
+}
+.nav { position:fixed; top:0; left:0; right:0; height:36px;
+  background:rgba(15,15,30,0.95); display:flex; align-items:center; padding:0 12px;
+  z-index:100; border-bottom:1px solid #333; gap:2px; overflow-x:auto; }
+.nav a { color:#778; text-decoration:none; font-size:11px; padding:4px 8px;
+  border-radius:4px; white-space:nowrap; transition:.2s; }
+.nav a:hover { color:#cef; background:rgba(255,255,255,0.08); }
+.nav a.active { color:#5cf; background:rgba(80,160,255,0.12); }
+.nav .sep { color:#445; margin:0 2px; }
+
+h1 { text-align:center; font-size:15px; color:#9cf; margin:4px 0; letter-spacing:1px; }
+.subtitle { text-align:center; font-size:10px; color:#667; margin-bottom:6px; }
+
+.layout { margin-top:42px; padding:4px; display:grid;
+  grid-template-columns: 1fr; gap:8px; max-width:1700px; }
+
+.panel { background:rgba(20,20,40,0.6); border:1px solid #2a2a4a;
+  border-radius:8px; margin:6px; padding:8px; }
+.panel-title { font-size:12px; color:#8cf; margin-bottom:6px;
+  border-bottom:1px solid #334; padding-bottom:3px; }
+.panel-title .hint { font-size:9px; color:#567; font-weight:normal; }
+
+.ctrl { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; font-size:11px; }
+.ctrl label { color:#889; }
+.ctrl select, .ctrl button {
+  background:#222; color:#ccd; border:1px solid #345; border-radius:4px;
+  padding:3px 8px; font-size:11px; cursor:pointer;
+}
+#status { color:#7a9; font-size:11px; margin-left:auto; }
+
+canvas { display:block; width:100%; cursor:crosshair; }
+#rowTierCanvas { cursor:pointer; }
+
+.tooltip { position:fixed; pointer-events:none; background:rgba(10,10,20,0.95);
+  border:1px solid #558; border-radius:4px; padding:4px 8px; font-size:11px;
+  z-index:200; display:none; line-height:1.6; white-space:nowrap; }
+
+.legend { display:flex; align-items:center; gap:8px; font-size:10px; color:#889; margin-top:6px; flex-wrap:wrap; }
+.legend .swatch { width:22px; height:10px; display:inline-block; border:1px solid #333; }
+
+a { color:#7aa2f7; }
+
+/* ═══ v2 浮窗补充样式 ═══ */
+#indModal .imcv{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px;}
+#indModal .imcv .l{color:#8b949e;font-size:11px;}
+#indModal .imcv .v{font-size:20px;font-weight:600;margin:2px 0;}
+#indModal .imcv .s{color:#8b949e;font-size:11px;}
 </style>
 </head>
 <body>

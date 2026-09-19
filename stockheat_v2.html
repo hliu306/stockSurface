@@ -604,7 +604,7 @@ function ensureModalDom(){
       '<div style="padding:16px 18px;">'+
         '<canvas id="imCanvas" style="width:100%;height:380px;cursor:crosshair;"></canvas>'+
         '<div id="imHint" style="color:#8b949e;font-size:11px;margin:4px 0 10px;">滚轮缩放 · 拖拽平移 · 双击复位 · 十字线读值 (THS 行业指数日线 2015→今)</div>'+
-        '<canvas id="imCanvas2" style="width:100%;height:140px;"></canvas>'+
+        '<canvas id="imCanvas2" style="width:100%;height:190px;"></canvas>'+
         '<div id="imCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;"></div>'+
         '<div class="note" style="margin-top:12px;">子页面为独立 HTML,含全部历史(2015→今)评分/排名,可收藏/分享; 浮窗为快视图。</div>'+
       '</div>'+
@@ -723,37 +723,74 @@ function imDrawK(){
   imDrawSub();
 }
 function imDrawSub(){
-  var cv = document.getElementById('imCanvas2'); if (!cv || !TIER || !IMK) return;
-  var W = cv.parentElement.clientWidth - 4, H = 140;
+  var cv = document.getElementById('imCanvas2'); if (!cv || !TIER || !IMK || !IMK.rows.length) return;
+  var W = cv.parentElement.clientWidth - 4, H = 190;
   cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio; cv.style.height = H+'px';
   var ctx = cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
   ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,W,H);
   var code = IMK.code, ser = TIER.series[code] || [];
+  if (!ser.length) return;
   var d2i = {}; TIER.dates.forEach(function(d,i){ d2i[d]=i; });
-  // 评分曲线全期浅色 + 视窗内加粗
-  var L=46, R=W-46, T=10, B=H-22;
-  var ss = ser.map(function(x){ return x.s; });
-  var smin = Math.min.apply(null, ss.concat([0])), smax = Math.max.apply(null, ss.concat([0]));
-  function XS(k){ return L + k/(Math.max(ser.length-1,1)) * (R-L); }
-  function YS(v){ return B - (v-smin)/(smax-smin||1) * (B-T); }
-  ctx.strokeStyle = '#30363d';
-  [smin,(smin+smax)/2,smax].forEach(function(v){ var y=YS(v); ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke(); });
-  // 全期
-  ctx.strokeStyle = '#58a6ff44'; ctx.lineWidth=1; ctx.beginPath();
-  ser.forEach(function(x,k){ var y=YS(x.s); if(k)ctx.lineTo(XS(k),y); else ctx.moveTo(XS(k),y); });
-  ctx.stroke();
-  // K线视窗映射到副图高亮区
-  var d0 = IMK.rows[IMK.view.i0].d, d1 = IMK.rows[Math.min(IMK.view.i1,IMK.rows.length)-1].d;
+  // 副图区间=K线视窗(随动): 找视窗首尾日在评分序列中的索引
+  var d0 = IMK.rows[IMK.view.i0].d, d1 = IMK.rows[IMK.view.i1-1].d;
   var k0 = d2i[d0], k1 = d2i[d1];
-  if (k0!=null && k1!=null){
-    ctx.fillStyle = '#58a6ff11'; ctx.fillRect(XS(k0), T, XS(k1)-XS(k0), B-T);
-    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth=1.6; ctx.beginPath();
-    for (var k=k0;k<=k1;k++){ var y=YS(ser[k].s); if(k>k0)ctx.lineTo(XS(k),y); else ctx.moveTo(XS(k),y); }
-    ctx.stroke();
+  if (k0 == null || k1 == null || k1 <= k0){ // 评分序列日期对不上时退化: 取末尾同长度
+    k0 = Math.max(0, ser.length - (IMK.view.i1 - IMK.view.i0)); k1 = ser.length - 1;
   }
-  ctx.fillStyle='#8b949e'; ctx.font='10px sans-serif'; ctx.textAlign='right';
+  var vis = ser.slice(k0, k1+1);
+  var L = 46, R = W-46, T = 12, B = H-42;          // 底部42px给bar
+  var ss = vis.map(function(x){ return x.s; }), rs = vis.map(function(x){ return x.r; });
+  var smin = Math.min.apply(null, ss.concat([0])), smax = Math.max.apply(null, ss.concat([0]));
+  var sp = (smax-smin)*0.08; smax+=sp; smin-=sp;
+  function XS(k){ return L + (k-k0)/Math.max(k1-k0,1) * (R-L); }
+  function YS(v){ return B - (v-smin)/(smax-smin||1) * (B-T); }
+  function YR(r){ return T + (r-1)/89 * (B-T); }   // 排名反向: 顶部=1
+  // 网格
+  ctx.strokeStyle = '#21262d'; ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif';
+  [0,.5,1].forEach(function(f){ var y=T+f*(B-T); ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke(); });
+  ctx.textAlign='right';
   ctx.fillText(smax.toFixed(2), L-5, T+8); ctx.fillText(smin.toFixed(2), L-5, B);
-  ctx.textAlign='left'; ctx.fillText('行业评分(全期浅·视窗亮) 2015→今', L+6, T+8);
+  ctx.textAlign='left'; ctx.fillText('1', R+5, T+8); ctx.fillText('90', R+5, B);
+  // 0线
+  if (0>smin && 0<smax){ ctx.strokeStyle='#30363d'; ctx.setLineDash([2,3]); ctx.beginPath();ctx.moveTo(L,YS(0));ctx.lineTo(R,YS(0));ctx.stroke();ctx.setLineDash([]); }
+  // 排名(右轴, 紫虚线, 反向)
+  ctx.strokeStyle = '#a371f7'; ctx.lineWidth = 1.4; ctx.setLineDash([4,3]);
+  ctx.beginPath();
+  vis.forEach(function(x,k){ var y=YR(x.r); if(k)ctx.lineTo(XS(k0+k),y); else ctx.moveTo(XS(k0+k),y); });
+  ctx.stroke(); ctx.setLineDash([]);
+  // 评分(左轴, 蓝实线)
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  vis.forEach(function(x,k){ var y=YS(x.s); if(k)ctx.lineTo(XS(k0+k),y); else ctx.moveTo(XS(k0+k),y); });
+  ctx.stroke();
+  // 最新点标注
+  var last = vis[vis.length-1];
+  ctx.fillStyle = '#58a6ff'; ctx.beginPath(); ctx.arc(XS(k1), YS(last.s), 3.5, 0, 7); ctx.fill();
+  // 十字线联动: K线crossIdx映射到副图竖线
+  if (IMK.crossIdx != null && IMK.crossIdx >= IMK.view.i0 && IMK.crossIdx < IMK.view.i1){
+    var cd = IMK.rows[IMK.crossIdx].d, ck = d2i[cd];
+    if (ck != null && ck >= k0 && ck <= k1){
+      ctx.strokeStyle = '#58a6ff88'; ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(XS(ck),T); ctx.lineTo(XS(ck),B); ctx.stroke(); ctx.setLineDash([]);
+      var cv2 = ser[ck];
+      ctx.fillStyle = '#e6edf3'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(cd.slice(0,4)+'-'+cd.slice(4,6)+'-'+cd.slice(6)+'  评分 '+cv2.s.toFixed(3)+'  排名#'+cv2.r, L+6, T+14);
+    }
+  }
+  // 底部随动热力bar: 视窗内逐日评分五档色条(与tierColor同色道)
+  var barT = B+8, barB = H-14, n = vis.length;
+  var bw = (R-L)/Math.max(n,1);
+  vis.forEach(function(x,k){
+    var col = tierColor(x.s);
+    ctx.fillStyle = col[0];
+    var mid = T + (barB-barT)/2 + ((0.5 - (x.s+0.5)) * (barB-barT)); // 简单纵向位置=评分强弱
+    ctx.fillRect(L + k*bw, barT, Math.max(bw-0.3,0.5), barB-barT);
+  });
+  // bar 上叠画排名曲线微缩(可选省略) — bar两端标注
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign='left';
+  ctx.fillText('热力bar(色=当日评分档位, 随视窗)', L, H-3);
+  ctx.textAlign='right';
+  ctx.fillText('蓝=评分(左)  紫=排名(右,反向)', R, H-3);
 }
 function imBindK(){
   var cv = document.getElementById('imCanvas'); if (!cv || cv.__bound) return; cv.__bound = true;

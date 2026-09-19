@@ -1096,12 +1096,13 @@ function smDrawDevia(ctx, L, R, T, B, n){
   }
   ctx.stroke();
   // 右轴标注(叠在价格轴更右侧? 用主图右轴x=R+6已有价格 — DEVIA轴放左侧)
-  ctx.fillStyle = '#ffa657'; ctx.font='10px sans-serif'; ctx.textAlign='left';
-  ctx.fillText('+'+lim.toFixed(1), L+4, T+10);
-  ctx.fillText('0', L+4, YD(0)-3);
-  ctx.fillText('-'+lim.toFixed(1), L+4, B-4);
+  ctx.fillStyle = '#ffa657'; ctx.font='10px sans-serif'; ctx.textAlign='right';
+  ctx.fillText('+'+lim.toFixed(1), R-8, T+10);
+  ctx.fillText('0', R-8, YD(0)-3);
+  ctx.fillText('-'+lim.toFixed(1), R-8, B-4);
+  ctx.textAlign = 'left';
   ctx.textAlign = 'right';
-  ctx.fillText('橙粗=累计DEVI·橙细=当日偏离(vs行业)', R-6, T+10);
+  ctx.fillText('橙粗=累计DEVI·橙细=当日偏离(vs行业)', R-52, T+10);
   ctx.textAlign = 'left';
 }
 

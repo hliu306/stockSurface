@@ -978,7 +978,7 @@ function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
       tip.innerHTML = '<b style="color:#cde">' + name + '</b> · ' + d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6) + '<br>' +
         '融资余额 <b style="color:#f9c">' + fmt(v_rz, '') + '</b> · 融券余额 <b style="color:#c9f">' + fmt(v_rq, '') + '</b><br>' +
         '券融比 <b style="color:#fc9">' + (v_rt == null ? '—' : v_rt.toFixed(3) + '%') + '</b>' +
-        '<br><span style="color:#667">' + (isInd ? '点击行 → 切换行业' : '') + '</span>';
+        '<br><span style="color:#667">' + (isInd ? '点击行 → 切换行业 + 杠杆曲线弹窗' : '点击行 → 杠杆曲线弹窗') + '</span>';
       var tx = e.clientX + 14, ty = e.clientY + 14;
       if (tx + 250 > window.innerWidth) tx = e.clientX - 240;
       if (ty + 90 > window.innerHeight) ty = e.clientY - 80;
@@ -995,6 +995,16 @@ function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
         var code = G.codes[i];
         if (location.hash !== '#' + code) location.hash = '#' + code;
         loadIndustry(code);
+        mgnOpenModal(code, true);
+      });
+    } else {
+      cv.addEventListener('click', function(e){
+        var G2 = MGN_STOCK_GEOM;
+        if (!G2) return;
+        var rect2 = cv.getBoundingClientRect();
+        var i2 = Math.floor((e.clientY - rect2.top - G2.padT) / G2.cellH);
+        if (i2 < 0 || i2 >= G2.rows.length) return;
+        mgnOpenModal(G2.rows[i2].ts, false);
       });
     }
   }
@@ -1002,6 +1012,210 @@ function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
   setTimeout(function(){ bindCv('mgnIndCanvas', true); bindCv('mgnStockCanvas', false); }, 300);
 })();
 
+
+// ═══ 杠杆弹窗: 融资/融券双线 + 券融比副图 ═══
+var MGM_MODAL=null, MGM=null;   // MGM={isInd,code,name,rec,view:{i0,i1},drag,cross}
+function mgnEnsureModal(){
+  if (MGM_MODAL) return;
+  var ov=document.createElement('div');
+  ov.id='mgnModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:110;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML=
+    '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:1100px;width:94vw;max-height:92vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.6);">'+
+      '<div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #30363d;position:sticky;top:0;background:#161b22;z-index:2;">'+
+        '<b id="mgmTitle" style="font-size:16px;color:#e6edf3;"></b>'+
+        '<span id="mgmSub" class="note"></span><span style="flex:1"></span>'+
+        '<button id="mgmClose" style="background:#21262d;color:#f85149;border:1px solid #30363d;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">✕ 关闭</button>'+
+      '</div>'+
+      '<div style="padding:16px 18px;">'+
+        '<canvas id="mgmCanvas" style="width:100%;height:340px;cursor:crosshair;"></canvas>'+
+        '<div id="mgmHint" style="color:#8b949e;font-size:11px;margin:4px 0 10px;">滚轮缩放 · 拖拽平移 · 双击复位 · 十字线读值 | <span style="color:#ff7b93">红=融资余额(左轴)</span> · <span style="color:#a371f7">紫=融券余额(右轴)</span> · <span style="color:#ffa657">橙=券融比(副图)</span></div>'+
+        '<canvas id="mgmCanvas2" style="width:100%;height:150px;"></canvas>'+
+        '<div id="mgmCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;"></div>'+
+        '<div class="note" style="margin-top:12px;">数据: 沪深交易所逐日两融明细 · 深市T+1 · 沪市融券余额=融券余量×收盘价。</div>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  MGM_MODAL=ov;
+  ov.addEventListener('click', function(e){ if(e.target===ov) MGM_MODAL.style.display='none'; });
+  document.getElementById('mgmClose').onclick=function(){ MGM_MODAL.style.display='none'; };
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape' && MGM_MODAL) MGM_MODAL.style.display='none'; });
+  mgnModalBind();
+}
+function mgnOpenModal(code, isInd){
+  if (!MGN) { mgnLoad(function(){ mgnOpenModal(code, isInd); }); return; }
+  var rec = isInd ? MGN.ind[code] : MGN.stock[code];
+  if (!rec) return;
+  mgnEnsureModal();
+  MGM = { isInd: !!isInd, code: code, name: rec.name || code, rec: rec,
+          view: { i0: 0, i1: MGN.dates.length }, drag: null, cross: null };
+  MGM_MODAL.style.display='flex';
+  document.getElementById('mgmTitle').textContent = (rec.name || code) + ' (' + code + ') · ' + (isInd ? '行业杠杆' : '个股杠杆');
+  document.getElementById('mgmSub').textContent = '融资/融券余额曲线 · ' + MGN.dates.length + '个交易日 (' +
+    MGN.dates[0].substring(0,4)+'-'+MGN.dates[0].substring(4,6)+'-'+MGN.dates[0].substring(6) + ' → ' +
+    MGN.dates[MGN.dates.length-1].substring(0,4)+'-'+MGN.dates[MGN.dates.length-1].substring(4,6)+'-'+MGN.dates[MGN.dates.length-1].substring(6) + ')';
+  mgnModalDraw(); mgnModalDrawSub(); mgnModalCards();
+}
+function mgnModalBind(){
+  var cv=document.getElementById('mgmCanvas'); if(!cv||cv.__mgbound) return; cv.__mgbound=true;
+  function rect(){ return cv.getBoundingClientRect(); }
+  cv.addEventListener('wheel', function(e){
+    e.preventDefault(); if(!MGM) return;
+    var r=rect(), mx=e.clientX-r.left;
+    var n=MGM.view.i1-MGM.view.i0;
+    var frac=Math.max(0,Math.min(1,(mx-10)/(r.width-74)));
+    var ci=MGM.view.i0+Math.floor(frac*n);
+    var f=e.deltaY>0?1.25:0.8;
+    var n2=Math.max(5,Math.min(MGN.dates.length,Math.round(n*f)));
+    var i0=Math.max(0,Math.min(MGN.dates.length-n2,Math.round(ci-frac*n2)));
+    MGM.view={i0:i0,i1:i0+n2};
+    mgnModalDraw(); mgnModalDrawSub();
+  },{passive:false});
+  cv.addEventListener('mousedown', function(e){ if(MGM) MGM.drag={x:e.clientX,v0:MGM.view.i0,n:MGM.view.i1-MGM.view.i0}; });
+  window.addEventListener('mousemove', function(e){
+    if(!MGM||!MGM_MODAL||MGM_MODAL.style.display==='none') return;
+    var r=rect();
+    if(MGM.drag){
+      var dIdx=Math.round((e.clientX-MGM.drag.x)/(r.width-74)*MGM.drag.n);
+      var i0=Math.max(0,Math.min(MGN.dates.length-MGM.drag.n,MGM.drag.v0-dIdx));
+      MGM.view={i0:i0,i1:i0+MGM.drag.n};
+    } else { MGM.cross={x:e.clientX-r.left,y:e.clientY-r.top}; }
+    mgnModalDraw(); mgnModalDrawSub();
+  });
+  window.addEventListener('mouseup', function(){ if(MGM) MGM.drag=null; });
+  cv.addEventListener('mouseleave', function(){ if(MGM){MGM.cross=null; mgnModalDraw(); mgnModalDrawSub();} });
+  cv.addEventListener('dblclick', function(){
+    if(MGM){ MGM.view={i0:0,i1:MGN.dates.length}; mgnModalDraw(); mgnModalDrawSub(); }
+  });
+}
+function mgnFmtYi(v){ return v==null?'—':(v>=1e8?(v/1e8).toFixed(2)+'亿':(v/1e4).toFixed(0)+'万'); }
+function mgnModalDraw(){
+  var cv=document.getElementById('mgmCanvas'); if(!cv||!MGM) return;
+  var W=cv.parentElement.clientWidth-4, H=340;
+  cv.width=W*devicePixelRatio; cv.height=H*devicePixelRatio; cv.style.height=H+'px';
+  var ctx=cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
+  var L=10, R=W-64, T=14, B=H-34;
+  var n=Math.max(2,MGM.view.i1-MGM.view.i0);
+  var rzA=MGM.rec.rzye||[], rqA=MGM.rec.rqye||[];
+  var rzV=[],rqV=[];
+  for(var i=MGM.view.i0;i<MGM.view.i1;i++){ if(rzA[i]!=null)rzV.push(rzA[i]); if(rqA[i]!=null)rqV.push(rqA[i]); }
+  if(!rzV.length&&!rqV.length) return;
+  var rzHi=Math.max.apply(null,rzV.concat([1])), rzLo=Math.min.apply(null,rzV.concat([0]));
+  var rqHi=Math.max.apply(null,rqV.concat([1])), rqLo=Math.min.apply(null,rqV.concat([0]));
+  var p1=(rzHi-rzLo)*0.08||rzHi*0.08||1; rzHi+=p1;
+  var p2=(rqHi-rqLo)*0.15||rqHi*0.15||1; rqHi+=p2;
+  function X(i){ return L+(i-MGM.view.i0+0.5)*(R-L)/n; }
+  function Yz(v){ return T+(rzHi-v)/(rzHi-rzLo||1)*(B-T); }
+  function Yq(v){ return T+(rqHi-v)/(rqHi-rqLo||1)*(B-T); }
+  ctx.font='10px sans-serif';
+  for(var g=0;g<=4;g++){
+    var y=T+(B-T)*g/4;
+    ctx.strokeStyle='#21262d'; ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(R,y); ctx.stroke();
+    ctx.textAlign='left'; ctx.fillStyle='#ff7b93'; ctx.fillText((rzLo+(rzHi-rzLo)*(1-g/4)/1e8).toFixed(0)+'亿', R+6, y+3);
+    ctx.textAlign='right'; ctx.fillStyle='#a371f7'; ctx.fillText((rqLo+(rqHi-rqLo)*(1-g/4)/1e8).toFixed(1)+'亿', L+2, y+3-11);
+  }
+  ctx.textAlign='center'; ctx.fillStyle='#8b949e';
+  var step=Math.max(1,Math.round(n/10));
+  for(var m=MGM.view.i0;m<MGM.view.i1;m+=step){
+    var d=MGN.dates[m];
+    ctx.fillText(d.substring(4,6)+'-'+d.substring(6,8), X(m), H-12);
+  }
+  ctx.beginPath(); var started=false;
+  for(var i2=MGM.view.i0;i2<MGM.view.i1;i2++){ if(rzA[i2]==null) continue;
+    if(!started){ ctx.moveTo(X(i2),Yz(rzA[i2])); started=true; } else ctx.lineTo(X(i2),Yz(rzA[i2])); }
+  ctx.strokeStyle='#ff7b93'; ctx.lineWidth=2; ctx.stroke();
+  ctx.beginPath(); started=false;
+  for(var i3=MGM.view.i0;i3<MGM.view.i1;i3++){ if(rqA[i3]==null) continue;
+    if(!started){ ctx.moveTo(X(i3),Yq(rqA[i3])); started=true; } else ctx.lineTo(X(i3),Yq(rqA[i3])); }
+  ctx.strokeStyle='#a371f7'; ctx.lineWidth=1.6; ctx.stroke();
+  ctx.lineWidth=1;
+  if(MGM.cross && MGM.cross.x>=L && MGM.cross.x<=R){
+    var ci=Math.floor((MGM.cross.x-L)/(R-L)*n)+MGM.view.i0;
+    if(ci>=MGM.view.i0 && ci<MGM.view.i1){
+      ctx.strokeStyle='#58a6ff'; ctx.setLineDash([4,3]);
+      ctx.beginPath(); ctx.moveTo(X(ci),T); ctx.lineTo(X(ci),B); ctx.stroke(); ctx.setLineDash([]);
+      var vr=rzA[ci]!=null?rzA[ci]:null, vq=rqA[ci]!=null?rqA[ci]:null, vt=(MGM.rec.ratio&&MGM.rec.ratio[ci]!=null)?MGM.rec.ratio[ci]:null;
+      var msg=MGN.dates[ci]+'  融资 '+(vr!=null?(vr/1e8).toFixed(2)+'亿':'—')+'  融券 '+(vq!=null?(vq/1e8).toFixed(2)+'亿':'—')+'  券融比 '+(vt!=null?vt.toFixed(3)+'%':'—');
+      ctx.font='11px sans-serif'; ctx.textAlign='left';
+      var tw=ctx.measureText(msg).width;
+      var tx=MGM.cross.x+8; if(tx+tw>R) tx=L;
+      ctx.fillStyle='rgba(13,17,23,.88)'; ctx.fillRect(tx,T+2,tw+10,16);
+      ctx.fillStyle='#c9d1d9'; ctx.fillText(msg,tx+5,T+14);
+      MGM.crossIdx=ci;
+    }
+  } else MGM.crossIdx=null;
+}
+function mgnModalDrawSub(){
+  var cv=document.getElementById('mgmCanvas2'); if(!cv||!MGM) return;
+  var W=cv.parentElement.clientWidth-4, H=150;
+  cv.width=W*devicePixelRatio; cv.height=H*devicePixelRatio; cv.style.height=H+'px';
+  var ctx=cv.getContext('2d'); ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
+  var L=10, R=W-64, T=10, B=H-22;
+  var n=Math.max(2,MGM.view.i1-MGM.view.i0);
+  var rtA=MGM.rec.ratio||[];
+  var vs=[];
+  for(var i=MGM.view.i0;i<MGM.view.i1;i++){ if(rtA[i]!=null&&rtA[i]>0)vs.push(rtA[i]); }
+  var hi=Math.max.apply(null,vs.concat([0.1])), lo=0;
+  var pad=(hi-lo)*0.1; hi+=pad;
+  function X(i){ return L+(i-MGM.view.i0+0.5)*(R-L)/n; }
+  function Y(v){ return T+(hi-v)/(hi-lo||1)*(B-T); }
+  ctx.font='10px sans-serif';
+  for(var g=0;g<=2;g++){
+    var y=T+(B-T)*g/2;
+    ctx.strokeStyle='#21262d'; ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(R,y); ctx.stroke();
+    ctx.fillStyle='#ffa657'; ctx.textAlign='left'; ctx.fillText((hi-(hi-lo)*g/2).toFixed(2)+'%', R+6, y+3);
+  }
+  ctx.beginPath(); ctx.moveTo(X(MGM.view.i0),Y(0));
+  for(var i2=MGM.view.i0;i2<MGM.view.i1;i2++){ if(rtA[i2]!=null&&rtA[i2]>0) ctx.lineTo(X(i2),Y(rtA[i2])); }
+  ctx.lineTo(X(MGM.view.i1-1),Y(0)); ctx.closePath();
+  ctx.fillStyle='rgba(255,166,87,.14)'; ctx.fill();
+  ctx.beginPath(); var st=false;
+  for(var i3=MGM.view.i0;i3<MGM.view.i1;i3++){ if(rtA[i3]==null||rtA[i3]<=0) continue;
+    if(!st){ctx.moveTo(X(i3),Y(rtA[i3])); st=true;} else ctx.lineTo(X(i3),Y(rtA[i3])); }
+  ctx.strokeStyle='#ffa657'; ctx.lineWidth=1.5; ctx.stroke(); ctx.lineWidth=1;
+  ctx.fillStyle='#8b949e'; ctx.textAlign='left'; ctx.font='11px sans-serif';
+  ctx.fillText('券融比 % (融券余额/融资余额)', L+6, T+12);
+  if(MGM.crossIdx!=null){
+    ctx.strokeStyle='#58a6ff'; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(X(MGM.crossIdx),T); ctx.lineTo(X(MGM.crossIdx),B); ctx.stroke(); ctx.setLineDash([]);
+    var vt=rtA[MGM.crossIdx];
+    ctx.fillStyle='#ffa657'; ctx.textAlign='left';
+    ctx.fillText(vt!=null?vt.toFixed(3)+'%':'—', Math.min(X(MGM.crossIdx)+6, R-46), T+12);
+  }
+}
+function mgnModalCards(){
+  var el=document.getElementById('mgmCards'); if(!el||!MGM) return;
+  var N=MGN.dates.length;
+  function lv(arr){ for(var i=N-1;i>=0;i--){ if(arr&&arr[i]!=null&&arr[i]>0) return {v:arr[i],i:i}; } return null; }
+  function pv(arr,i){ return (arr&&arr[i]!=null&&arr[i]>0)?arr[i]:null; }
+  var rzL=lv(MGM.rec.rzye), rqL=lv(MGM.rec.rqye), rtL=lv(MGM.rec.ratio);
+  function chg(arr){
+    var a=pv(arr,Math.max(0,N-6)), b=pv(arr,N-1), a0=pv(arr,0);
+    var d5=(a!=null&&b!=null)?(b/a-1)*100:null, dAll=(a0!=null&&b!=null)?(b/a0-1)*100:null;
+    return {d5:d5,dAll:dAll}; }
+  var c1=chg(MGM.rec.rzye), c2=chg(MGM.rec.rqye);
+  function fmtPct(x){ return x==null?'—':(x>=0?'+':'')+x.toFixed(2)+'%'; }
+  function card(label,val,sub,color){
+    return '<div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px;">'+
+      '<div style="color:#8b949e;font-size:11px;">'+label+'</div>'+
+      '<div style="font-size:20px;font-weight:600;color:'+(color||'#e6edf3')+';margin:2px 0;">'+val+'</div>'+
+      '<div style="color:#8b949e;font-size:11px;">'+(sub||'')+'</div></div>';
+  }
+  var cards=[
+    card('融资余额(最新)', rzL?mgnFmtYi(rzL.v):'—', '5日 '+fmtPct(c1.d5)+' · 区间 '+fmtPct(c1.dAll), '#ff7b93'),
+    card('融券余额(最新)', rqL?mgnFmtYi(rqL.v):'—', '5日 '+fmtPct(c2.d5)+' · 区间 '+fmtPct(c2.dAll), '#a371f7'),
+    card('券融比(最新)', rtL?rtL.v.toFixed(3)+'%':'—', '融券/融资 · 越高=做空压力越大', '#ffa657')
+  ];
+  if(MGM.isInd && MGM.rec){
+    var rank=1, last=N-1;
+    Object.keys(MGN.ind).forEach(function(c){ var o=MGN.ind[c];
+      if(o.rzye&&o.rzye[last]!=null&&MGM.rec.rzye&&MGM.rec.rzye[last]!=null&&o.rzye[last]>MGM.rec.rzye[last]) rank++; });
+    cards.push(card('融资余额行业排名', '#'+rank+' / '+Object.keys(MGN.ind).length, '按最新日融资余额', '#58a6ff'));
+  }
+  el.innerHTML=cards.join('');
+}
 
 // ═══ v2 浮窗: THS行业指数日线K线(交互) + 评分排名副图 ═══
 var IMK = null;        // {rows:[{d,o,h,l,c,v,a}], view:{i0,i1}, drag, cross}

@@ -134,8 +134,8 @@ a { color:#7aa2f7; }
     </select>
     <label>范围</label>
     <select id="mgnRange">
-      <option value="60" selected>60日</option>
-      <option value="250">一年</option>
+      <option value="60">60日</option>
+      <option value="250" selected>一年</option>
       <option value="500">两年</option>
       <option value="1000">四年</option>
       <option value="0">全部</option>
@@ -1090,7 +1090,7 @@ function mgnOpenModal(code, isInd){
 function mgnOpenModal2(code, isInd, rec){
   mgnEnsureModal();
   MGM = { isInd: !!isInd, code: code, name: rec.name || code, rec: rec,
-          view: { i0: 0, i1: MGN.dates.length }, drag: null, cross: null };
+          view: { i0: Math.max(0, MGN.dates.length - 250), i1: MGN.dates.length }, drag: null, cross: null };
   MGM_MODAL.style.display='flex';
   document.getElementById('mgmTitle').textContent = (rec.name || code) + ' (' + code + ') · ' + (isInd ? '行业杠杆' : '个股杠杆');
   document.getElementById('mgmSub').textContent = '融资/融券余额曲线 · ' + MGN.dates.length + '个交易日 (' +
@@ -1127,7 +1127,7 @@ function mgnModalBind(){
   window.addEventListener('mouseup', function(){ if(MGM) MGM.drag=null; });
   cv.addEventListener('mouseleave', function(){ if(MGM){MGM.cross=null; mgnModalDraw(); mgnModalDrawSub();} });
   cv.addEventListener('dblclick', function(){
-    if(MGM){ MGM.view={i0:0,i1:MGN.dates.length}; mgnModalDraw(); mgnModalDrawSub(); }
+    if(MGM){ MGM.view={i0:Math.max(0,MGN.dates.length-250),i1:MGN.dates.length}; mgnModalDraw(); mgnModalDrawSub(); }
   });
 }
 function mgnFmtYi(v){ return v==null?'—':(v>=1e8?(v/1e8).toFixed(2)+'亿':(v/1e4).toFixed(0)+'万'); }

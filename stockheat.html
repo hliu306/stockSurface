@@ -887,9 +887,10 @@ function mgnDrawStock(){
   if (!cv || !MGN || !CUR) return;
   var mode = document.getElementById('mgnMode').value;
   var rg = parseInt(document.getElementById('mgnRange').value);
-  var dates = MGN.dates.slice(rg > 0 ? Math.max(0, MGN.dates.length - rg) : 0);
-  var di0 = MGN.dates.length - dates.length;
-  var lastI = MGN.dates.length - 1;
+  var sdates = MGN.stockDates || MGN.dates;   // 个股层自带250日轴
+  var dates = sdates.slice(rg > 0 ? Math.max(0, sdates.length - rg) : 0);
+  var di0 = sdates.length - dates.length;
+  var lastI = sdates.length - 1;
   // 当前行业个股(取热力图CUR.stocks顺序 ∩ margin有数据), 按最新mode值降序
   var rows = [];
   CUR.stocks.forEach(function(st){
@@ -944,7 +945,7 @@ function mgnDrawStock(){
     ctx.fillText(d2.substring(2, 4) + '/' + d2.substring(4, 6), padL + m * cellW, H - 8);
   }
   MGN_STOCK_GEOM = { padL: padL, padT: padT, cellW: cellW, cellH: rowH, dates: dates, rows: rows, di0: di0 };
-  document.getElementById('mgnStockHint').textContent = '· ' + CUR.industry + ' ' + rows.length + '只(两融标的) · ' + MGN.dates[MGN.dates.length-1];
+  document.getElementById('mgnStockHint').textContent = '· ' + CUR.industry + ' ' + rows.length + '只(两融标的) · ' + sdates[sdates.length-1] + (MGN.stockDates ? ' (个股层近250日)' : '');
 }
 function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
 
@@ -1042,10 +1043,36 @@ function mgnEnsureModal(){
   document.addEventListener('keydown', function(e){ if(e.key==='Escape' && MGM_MODAL) MGM_MODAL.style.display='none'; });
   mgnModalBind();
 }
+var MGN_FULL = null;
+function mgnEnsureFull(cb){
+  if (MGN_FULL) { cb(); return; }
+  fetch('margin_heat_full.json?_=' + Date.now())
+  .then(function(r){ return r.json(); })
+  .then(function(j){ MGN_FULL = j;
+    // 合并: 个股序列换全程版(行业已是全程)
+    MGN_FULL.dates.forEach(function(d, i){ MGN_DATE_IDX[d] = i; });
+    cb(); })
+  .catch(function(e){ cb(); });   // 失败则用现有数据
+}
+var MGN_DATE_IDX = {};
 function mgnOpenModal(code, isInd){
   if (!MGN) { mgnLoad(function(){ mgnOpenModal(code, isInd); }); return; }
   var rec = isInd ? MGN.ind[code] : MGN.stock[code];
   if (!rec) return;
+  // 个股且序列被截断(页面版只带250日) → 按需补全程
+  if (!isInd && MGN_FULL === null && rec.rzye && rec.rzye.length < MGN.dates.length) {
+    mgnEnsureFull(function(){
+      if (MGN_FULL && MGN_FULL.stock[code]) { MGN.stock[code] = MGN_FULL.stock[code]; rec = MGN.stock[code]; }
+      mgnOpenModal2(code, isInd, rec);
+    });
+    return;
+  }
+  if (!isInd && MGN_FULL && MGN_FULL.stock[code] && MGN.stock[code].rzye.length < MGN_FULL.stock[code].rzye.length) {
+    MGN.stock[code] = MGN_FULL.stock[code]; rec = MGN.stock[code];
+  }
+  mgnOpenModal2(code, isInd, rec);
+}
+function mgnOpenModal2(code, isInd, rec){
   mgnEnsureModal();
   MGM = { isInd: !!isInd, code: code, name: rec.name || code, rec: rec,
           view: { i0: 0, i1: MGN.dates.length }, drag: null, cross: null };

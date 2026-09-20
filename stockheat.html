@@ -124,7 +124,7 @@ a { color:#7aa2f7; }
 </div>
 
 <div class="panel">
-  <div class="panel-title">杠杆资金热力图 · 融资/融券 <span class="hint">（数据: 沪深交易所逐日两融 · 深市T+1 · 点行=行业切换 · 悬停读值）</span></div>
+  <div class="panel-title">杠杆资金热力图 · 融资/融券 <span class="hint">（沪深交易所逐日两融 · 深市T+1 · 行内归一=每行自身min→max,时间变化一眼可见 · 全局分位=板块间对比 · 点行=切换行业 · 悬停读值）</span></div>
   <div class="ctrl">
     <label>模式</label>
     <select id="mgnMode">
@@ -137,6 +137,11 @@ a { color:#7aa2f7; }
       <option value="0" selected>全部</option>
       <option value="60">60日</option>
       <option value="20">20日</option>
+    </select>
+    <label>色阶</label>
+    <select id="mgnNorm">
+      <option value="row" selected>行内归一(看自身变化)</option>
+      <option value="global">全局分位(看板块对比)</option>
     </select>
     <span id="mgnStatus" style="color:#567;font-size:10px"></span>
   </div>
@@ -773,14 +778,34 @@ function mgnSeqColor(t){   // 深蓝→青→黄→红 sequential
   var c = stops[i].map(function(v, k){ return Math.round(v + (stops[i+1][k] - v) * f); });
   return 'rgb(' + c.join(',') + ')';
 }
-function mgnRatioColor(v){  // 券融比: 0→灰, 高→紫红(融券压力)
-  var t = Math.max(0, Math.min(1, v / 5));   // 5%满幅
+function mgnRatioColor(v){ return mgnRatioT(v / 5); }   // 5%满幅
+function mgnRatioT(t){   // 券融比色阶: 0→灰, 高→紫红
+  t = Math.max(0, Math.min(1, t));
   if (t < 0.06) return '#2c2c44';
   var stops = [[44,44,68],[108,74,182],[190,80,160],[240,90,110]];
   var x = t * (stops.length - 1), i = Math.floor(x), f = x - i;
   if (i >= stops.length - 1) { i = stops.length - 2; f = 1; }
   var c = stops[i].map(function(v, k){ return Math.round(v + (stops[i+1][k] - v) * f); });
   return 'rgb(' + c.join(',') + ')';
+}
+function mgnRowSc(arr, mode, di0, nAll, norm){   // 行内归一范围(返回null=用全局)
+  if (norm !== 'row' || !arr) return null;
+  var rlo = Infinity, rhi = -Infinity;
+  for (var i = di0; i < nAll; i++) { var v = arr[i];
+    if (v != null && v > 0) { var x = mode === 'ratio' ? v : Math.log(v); if (x < rlo) rlo = x; if (x > rhi) rhi = x; } }
+  if (rlo === Infinity) return null;
+  if (rhi - rlo < Math.max(1e-9, Math.abs(rlo) * 1e-6)) return [rlo - 1, rhi + 1];   // 恒定行→中色
+  return [rlo, rhi];
+}
+function mgnCellCol(v, mode, sc, lo, hi){
+  if (v == null || v <= 0) return '#16162a';
+  if (mode === 'ratio') {
+    if (sc) return mgnRatioT(Math.max(0, Math.min(1, (v - sc[0]) / (sc[1] - sc[0]))));
+    return mgnRatioColor(v);
+  }
+  var lv = Math.log(v);
+  var t = sc ? (lv - sc[0]) / (sc[1] - sc[0]) : (lv - lo) / (hi - lo);
+  return mgnSeqColor(Math.max(0, Math.min(1, t)));
 }
 function mgnDrawInd(){
   var cv = document.getElementById('mgnIndCanvas');
@@ -807,27 +832,27 @@ function mgnDrawInd(){
   var W = rect.width;
   ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
   var cellW = (W - padL - padR) / dates.length;
-  // 色阶范围: 视窗内 5%~98% 分位
-  var vals = [];
-  codes.forEach(function(c){ var arr = MGN.ind[c][mode]; if (!arr) return;
-    for (var i = di0; i < MGN.dates.length; i++) { var v = arr[i]; if (v != null && v > 0) vals.push(mode === 'ratio' ? v : Math.log(v)); } });
-  vals.sort(function(a,b){ return a - b; });
-  var lo = vals.length ? vals[Math.floor(vals.length * 0.02)] : 0;
-  var hi = vals.length ? vals[Math.floor(vals.length * 0.98)] : 1;
-  if (hi <= lo) hi = lo + 1;
-  if (mode !== 'ratio') { lo = Math.log(1e6); if (hi <= lo) hi = lo + 1; }  // 下限100万
+  // 色阶: 行内归一(每行自身min→max) 或 全局2%~98%分位
+  var norm = document.getElementById('mgnNorm') ? document.getElementById('mgnNorm').value : 'global';
+  var lo = 0, hi = 1;
+  if (norm !== 'row') {
+    var vals = [];
+    codes.forEach(function(c){ var arr = MGN.ind[c][mode]; if (!arr) return;
+      for (var i = di0; i < MGN.dates.length; i++) { var v = arr[i]; if (v != null && v > 0) vals.push(mode === 'ratio' ? v : Math.log(v)); } });
+    vals.sort(function(a,b){ return a - b; });
+    lo = vals.length ? vals[Math.floor(vals.length * 0.02)] : 0;
+    hi = vals.length ? vals[Math.floor(vals.length * 0.98)] : 1;
+    if (hi <= lo) hi = lo + 1;
+    if (mode !== 'ratio') { lo = Math.log(1e6); if (hi <= lo) hi = lo + 1; }  // 下限100万
+  }
   MGN_SCALE = { lo: lo, hi: hi };
   for (var i = 0; i < codes.length; i++) {
     var c = codes[i], arr = MGN.ind[c][mode];
+    var sc = mgnRowSc(arr, mode, di0, MGN.dates.length, norm);
     var y = padT + i * rowH;
     for (var jj = 0; jj < dates.length; jj++) {
       var v = arr ? arr[di0 + jj] : null;
-      var col = '#16162a';
-      if (v != null && v > 0) {
-        var t = (mode === 'ratio') ? v : (Math.log(v) - lo) / (hi - lo);
-        col = (mode === 'ratio') ? mgnRatioColor(v) : mgnSeqColor(t);
-      }
-      ctx.fillStyle = col;
+      ctx.fillStyle = mgnCellCol(v, mode, sc, lo, hi);
       ctx.fillRect(padL + jj * cellW, y, Math.ceil(cellW) + 1, rowH - 1);
     }
   }
@@ -886,18 +911,15 @@ function mgnDrawStock(){
   var W = rect.width;
   ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
   var cellW = (W - padL - padR) / dates.length;
+  var norm = document.getElementById('mgnNorm') ? document.getElementById('mgnNorm').value : 'global';
   var lo = MGN_SCALE ? MGN_SCALE.lo : 0, hi = MGN_SCALE ? MGN_SCALE.hi : 1;
   for (var i = 0; i < rows.length; i++) {
     var arr = rows[i].m[mode];
+    var sc = mgnRowSc(arr, mode, di0, MGN.dates.length, norm);
     var y = padT + i * rowH;
     for (var jj = 0; jj < dates.length; jj++) {
       var v = arr ? arr[di0 + jj] : null;
-      var col = '#16162a';
-      if (v != null && v > 0) {
-        var t = (mode === 'ratio') ? v : (Math.log(v) - lo) / (hi - lo);
-        col = (mode === 'ratio') ? mgnRatioColor(v) : mgnSeqColor(t);
-      }
-      ctx.fillStyle = col;
+      ctx.fillStyle = mgnCellCol(v, mode, sc, lo, hi);
       ctx.fillRect(padL + jj * cellW, y, Math.ceil(cellW) + 1, rowH - 1);
     }
   }
@@ -1715,7 +1737,7 @@ fetch('stock_heat_tier.json?_=' + Date.now())
   document.getElementById(id).addEventListener('change', function() { draw(); drawRowTier(); });
 });
 window.addEventListener('resize', function(){ if (CUR) { draw(); drawRowTier(); } if (TIER) drawTierAll(); });
-['mgnMode','mgnRange'].forEach(function(id) {
+['mgnMode','mgnRange','mgnNorm'].forEach(function(id) {
   document.getElementById(id).addEventListener('change', function() { mgnDrawAll(); });
 });
 mgnLoad(function(){ mgnDrawAll(); });

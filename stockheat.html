@@ -148,6 +148,8 @@ a { color:#7aa2f7; }
     <span id="mgnStatus" style="color:#567;font-size:10px"></span>
   </div>
   <canvas id="mgnIndCanvas" style="width:100%"></canvas>
+  <div style="font-size:10px;color:#89a;margin:6px 0 2px">行业指示bar · <span id="mgnBarHint" style="color:#678"></span><span style="color:#456"> · 点击bar弹行业杠杆窗</span></div>
+  <canvas id="mgnBarCanvas" style="width:100%;cursor:pointer"></canvas>
   <div style="font-size:10px;color:#89a;margin:6px 0 2px">当前行业个股杠杆 <span id="mgnStockHint" style="color:#678"></span></div>
   <canvas id="mgnStockCanvas" style="width:100%"></canvas>
 </div>
@@ -675,7 +677,7 @@ function afterLoad() {
   draw();
   drawRowTier();
   drawTierAll();   // refresh yellow highlight of current industry
-  if (MGN) mgnDrawStock();
+  if (MGN) { mgnDrawStock(); mgnDrawBar(); }
 }
 </script>
 <script>
@@ -962,7 +964,65 @@ function mgnDrawStock(){
   MGN_STOCK_GEOM = { padL: padL, padT: padT, cellW: cellW, cellH: rowH, dates: dates, rows: rows, di0: di0 };
   document.getElementById('mgnStockHint').textContent = '· ' + CUR.industry + ' ' + rows.length + '只(两融标的) · ' + sdates[sdates.length-1] + (MGN.stockDates ? ' (个股层近250日)' : '');
 }
-function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
+function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); mgnDrawBar(); }
+// 行业指示bar: 当前行业在当前指标/色阶/时间范围下的单行时间轴(与个股层同轴)
+function mgnDrawBar(){
+  var cv = document.getElementById('mgnBarCanvas');
+  if (!cv || !MGN || !CUR) return;
+  var mode = document.getElementById('mgnMode').value;
+  var rg = parseInt(document.getElementById('mgnRange').value);
+  var sdates = MGN.stockDates || MGN.dates;
+  if (rg === 0 || rg > sdates.length){ if (MGN_FULL === null){ mgnEnsureFull(function(){ mgnDrawBar(); }); return; } if (MGN_FULL){ MGN.stock = MGN_FULL.stock; MGN.stockDates = MGN_FULL.dates; sdates = MGN.stockDates; } }
+  // 行业序列用全dates轴(2838全程), 视窗=个股层同款范围(按sdates尾对齐)
+  var indDates = MGN.dates;
+  var take = rg > 0 ? Math.min(rg, sdates.length) : sdates.length;
+  var i1 = indDates.length, i0 = i1 - take;   // 行业轴尾部对齐
+  var lastI = sdates.length - 1;
+  var code = CUR.ths_code;
+  var rec = MGN.ind[code]; if (!rec) { document.getElementById('mgnBarHint').textContent = '行业无两融数据'; return; }
+  var arr = rec[mode];
+  // 色阶: 复用主图行内归一/全局分位同款逻辑(在视窗内计算)
+  var norm = document.getElementById('mgnNorm') ? document.getElementById('mgnNorm').value : 'row';
+  var lo = 0, hi = 1;
+  var sc = mgnRowSc(arr, mode, i0, i1, norm);
+  if (!sc){
+    var vals = [];
+    for (var i = i0; i < i1; i++){ var v = arr ? arr[i] : null; if (v != null && v > 0) vals.push(mode === 'ratio' ? v : Math.log(v)); }
+    vals.sort(function(a,b){ return a-b; });
+    lo = vals.length ? vals[Math.floor(vals.length*0.02)] : 0;
+    hi = vals.length ? vals[Math.floor(vals.length*0.98)] : 1;
+    if (hi <= lo) hi = lo + 1;
+    if (mode !== 'ratio') { lo = Math.log(1e6); if (hi <= lo) hi = lo + 1; }
+  } else { lo = sc[0]; hi = sc[1]; }
+  var dpr = window.devicePixelRatio || 1;
+  var rect = cv.getBoundingClientRect();
+  var H = 26, W = rect.width;
+  cv.style.height = H + 'px'; cv.width = W * dpr; cv.height = H * dpr;
+  var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+  var padL = 150, padR = 56;
+  var cellW = (W - padL - padR) / take;
+  for (var jj = 0; jj < take; jj++){
+    var v = arr ? arr[i0 + jj] : null;
+    ctx.fillStyle = mgnCellCol(v, mode, sc, lo, hi);
+    ctx.fillRect(padL + jj * cellW, 4, Math.ceil(cellW) + 1, H - 14);
+    if (v != null && v > 0 && (mode === 'rzye' || mode === 'rqye')) {
+      // 5日均线覆盖(细线, 读值辅助)
+    }
+  }
+  // 标签: 行业名+最新值(右缘)
+  var lastv = arr ? arr[Math.min(i1 - 1, arr.length - 1)] : null;
+  var disp = disp2(indDates[Math.min(i1 - 1, indDates.length - 1)], lastv, mode);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#cde'; ctx.font = '11px sans-serif';
+  ctx.fillText(rec.name, padL - 34, H - 8);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#788'; ctx.font = '10px sans-serif';
+  ctx.fillText(disp, W - padR + 4, H - 8);
+  MGN_BAR_GEOM = { padL: padL, padT: 4, cellW: cellW, cellH: H - 14, dates: indDates.slice(i0, i1), i0: i0 };
+  var modeName = mode === 'rzye' ? '融资余额' : (mode === 'rqye' ? '融券余额' : '券融比');
+  document.getElementById('mgnBarHint').textContent = '· ' + rec.name + ' (' + code + ') · ' + modeName;
+}
+function disp2(d, v, mode){ return (v == null ? '—' : (mode === 'ratio' ? v.toFixed(2) + '%' : (v >= 1e8 ? (v/1e8).toFixed(0) + '亿' : (v/1e4).toFixed(0) + '万'))); }
+var MGN_BAR_GEOM = null;
 
 // 杠杆热力图交互: hover读值 + 点行切换行业
 (function(){
@@ -994,7 +1054,7 @@ function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
       tip.innerHTML = '<b style="color:#cde">' + name + '</b> · ' + d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6) + '<br>' +
         '融资余额 <b style="color:#f9c">' + fmt(v_rz, '') + '</b> · 融券余额 <b style="color:#c9f">' + fmt(v_rq, '') + '</b><br>' +
         '券融比 <b style="color:#fc9">' + (v_rt == null ? '—' : v_rt.toFixed(3) + '%') + '</b>' +
-        '<br><span style="color:#667">' + (isInd ? '点击行 → 切换行业 + 杠杆曲线弹窗' : '点击行 → 杠杆曲线弹窗') + '</span>';
+        '<br><span style="color:#667">' + (isInd ? '点击行 → 切换行业(不弹窗)' : '点击行 → 杠杆曲线弹窗') + '</span>';
       var tx = e.clientX + 14, ty = e.clientY + 14;
       if (tx + 250 > window.innerWidth) tx = e.clientX - 240;
       if (ty + 90 > window.innerHeight) ty = e.clientY - 80;
@@ -1010,8 +1070,7 @@ function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
         if (i < 0 || i >= G.codes.length) return;
         var code = G.codes[i];
         if (location.hash !== '#' + code) location.hash = '#' + code;
-        loadIndustry(code);
-        mgnOpenModal(code, true);
+        loadIndustry(code);   // 只切换行业(bar+个股层联动), 弹窗走行业指示bar
       });
     } else {
       cv.addEventListener('click', function(e){
@@ -1024,6 +1083,34 @@ function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
       });
     }
   }
+  // 行业指示bar: 点击→行业杠杆弹窗; hover→读值
+  setTimeout(function(){
+    var bcv = document.getElementById('mgnBarCanvas');
+    if (bcv && !bcv.__mgbound){
+      bcv.__mgbound = true;
+      bcv.addEventListener('click', function(){ if (CUR && MGN) mgnOpenModal(CUR.ths_code, true); });
+      bcv.addEventListener('mousemove', function(e){
+        var G = MGN_BAR_GEOM, tip = document.getElementById('tip');
+        if (!G || !MGN || !CUR) return;
+        var rect = bcv.getBoundingClientRect();
+        var jj = Math.floor((e.clientX - rect.left - G.padL) / G.cellW);
+        if (jj < 0 || jj >= G.dates.length) { if (tip) tip.style.display = 'none'; return; }
+        var rec = MGN.ind[CUR.ths_code]; if (!rec) return;
+        var ai = G.i0 + jj, d = G.dates[jj];
+        function pick(a){ return a && a[ai] != null ? a[ai] : null; }
+        var v_rz = pick(rec.rzye), v_rq = pick(rec.rqye), v_rt = pick(rec.ratio);
+        var fmt = function(v){ return v == null ? '—' : (v >= 1e8 ? (v/1e8).toFixed(2) + '亿' : (v/1e4).toFixed(0) + '万'); };
+        tip.innerHTML = '<b style="color:#cde">' + rec.name + '</b> · ' + d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6) + '<br>' +
+          '融资余额 <b style="color:#f9c">' + fmt(v_rz) + '</b> · 融券余额 <b style="color:#c9f">' + fmt(v_rq) + '</b><br>' +
+          '券融比 <b style="color:#fc9">' + (v_rt == null ? '—' : v_rt.toFixed(3) + '%') + '</b>' +
+          '<br><span style="color:#667">点击bar → ' + rec.name + '杠杆曲线弹窗</span>';
+        tip.style.display = 'block';
+        tip.style.left = (e.clientX + 14 > window.innerWidth - 250 ? e.clientX - 240 : e.clientX + 14) + 'px';
+        tip.style.top = (e.clientY + 90 > window.innerHeight ? e.clientY - 80 : e.clientY + 14) + 'px';
+      });
+      bcv.addEventListener('mouseleave', function(){ var tip = document.getElementById('tip'); if (tip) tip.style.display = 'none'; });
+    }
+  }, 300);
   // 延迟绑定(等DOM)
   setTimeout(function(){ bindCv('mgnIndCanvas', true); bindCv('mgnStockCanvas', false); }, 300);
 })();

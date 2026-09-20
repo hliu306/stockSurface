@@ -124,6 +124,27 @@ a { color:#7aa2f7; }
 </div>
 
 <div class="panel">
+  <div class="panel-title">杠杆资金热力图 · 融资/融券 <span class="hint">（数据: 沪深交易所逐日两融 · 深市T+1 · 点行=行业切换 · 悬停读值）</span></div>
+  <div class="ctrl">
+    <label>模式</label>
+    <select id="mgnMode">
+      <option value="rzye" selected>融资余额(亿)</option>
+      <option value="rqye">融券余额(亿)</option>
+      <option value="ratio">券融比%(融券/融资)</option>
+    </select>
+    <label>范围</label>
+    <select id="mgnRange">
+      <option value="0" selected>全部</option>
+      <option value="60">60日</option>
+      <option value="20">20日</option>
+    </select>
+    <span id="mgnStatus" style="color:#567;font-size:10px"></span>
+  </div>
+  <canvas id="mgnIndCanvas" style="width:100%"></canvas>
+  <div style="font-size:10px;color:#89a;margin:6px 0 2px">当前行业个股杠杆 <span id="mgnStockHint" style="color:#678"></span></div>
+  <canvas id="mgnStockCanvas" style="width:100%"></canvas>
+</div>
+<div class="panel">
   <div class="panel-title">个股热力图 <span id="indTitle" style="color:#cde;font-weight:normal"></span></div>
   <div class="ctrl">
     <label>行业</label><select id="indSel"></select>
@@ -647,6 +668,7 @@ function afterLoad() {
   draw();
   drawRowTier();
   drawTierAll();   // refresh yellow highlight of current industry
+  if (MGN) mgnDrawStock();
 }
 </script>
 <script>
@@ -732,6 +754,232 @@ function closeModal(){ if (MODAL) MODAL.style.display='none'; }
     drawStockModal(st);
   });
 })();
+
+
+// ═══ 杠杆资金热力图(两融) ═══
+var MGN = null;   // margin_heat.json
+function mgnLoad(cb){
+  if (MGN) { cb(); return; }
+  fetch('margin_heat.json?_=' + Date.now())
+  .then(function(r){ return r.json(); })
+  .then(function(j){ MGN = j; cb(); })
+  .catch(function(e){ document.getElementById('mgnStatus').textContent = '加载失败: ' + e; });
+}
+function mgnSeqColor(t){   // 深蓝→青→黄→红 sequential
+  t = Math.max(0, Math.min(1, t));
+  var stops = [[13,17,38],[16,70,122],[26,148,150],[190,180,60],[220,80,50]];
+  var x = t * (stops.length - 1), i = Math.floor(x), f = x - i;
+  if (i >= stops.length - 1) { i = stops.length - 2; f = 1; }
+  var c = stops[i].map(function(v, k){ return Math.round(v + (stops[i+1][k] - v) * f); });
+  return 'rgb(' + c.join(',') + ')';
+}
+function mgnRatioColor(v){  // 券融比: 0→灰, 高→紫红(融券压力)
+  var t = Math.max(0, Math.min(1, v / 5));   // 5%满幅
+  if (t < 0.06) return '#2c2c44';
+  var stops = [[44,44,68],[108,74,182],[190,80,160],[240,90,110]];
+  var x = t * (stops.length - 1), i = Math.floor(x), f = x - i;
+  if (i >= stops.length - 1) { i = stops.length - 2; f = 1; }
+  var c = stops[i].map(function(v, k){ return Math.round(v + (stops[i+1][k] - v) * f); });
+  return 'rgb(' + c.join(',') + ')';
+}
+function mgnDrawInd(){
+  var cv = document.getElementById('mgnIndCanvas');
+  if (!cv || !MGN) return;
+  var mode = document.getElementById('mgnMode').value;
+  var rg = parseInt(document.getElementById('mgnRange').value);
+  var dates = MGN.dates.slice(rg > 0 ? Math.max(0, MGN.dates.length - rg) : 0);
+  var di0 = MGN.dates.length - dates.length;
+  // 行业排序: 最新日mode值降序
+  var lastI = MGN.dates.length - 1;
+  var codes = Object.keys(MGN.ind).sort(function(a, b){
+    var f = function(c){ var v = MGN.ind[c][mode]; return v ? v[Math.min(lastI, v.length-1)] : -1; };
+    return f(b) - f(a);
+  });
+  var dpr = window.devicePixelRatio || 1;
+  var rect = cv.getBoundingClientRect();
+  var rowH = codes.length <= 40 ? 18 : (codes.length <= 80 ? 14 : 11);
+  var padL = 150, padR = 56, padT = 8, padB = 24;
+  var H = padT + padB + codes.length * rowH;
+  cv.style.height = H + 'px';
+  cv.width = rect.width * dpr; cv.height = H * dpr;
+  var ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+  var cellW = (W - padL - padR) / dates.length;
+  // 色阶范围: 视窗内 5%~98% 分位
+  var vals = [];
+  codes.forEach(function(c){ var arr = MGN.ind[c][mode]; if (!arr) return;
+    for (var i = di0; i < MGN.dates.length; i++) { var v = arr[i]; if (v != null && v > 0) vals.push(mode === 'ratio' ? v : Math.log(v)); } });
+  vals.sort(function(a,b){ return a - b; });
+  var lo = vals.length ? vals[Math.floor(vals.length * 0.02)] : 0;
+  var hi = vals.length ? vals[Math.floor(vals.length * 0.98)] : 1;
+  if (hi <= lo) hi = lo + 1;
+  if (mode !== 'ratio') { lo = Math.log(1e6); if (hi <= lo) hi = lo + 1; }  // 下限100万
+  MGN_SCALE = { lo: lo, hi: hi };
+  for (var i = 0; i < codes.length; i++) {
+    var c = codes[i], arr = MGN.ind[c][mode];
+    var y = padT + i * rowH;
+    for (var jj = 0; jj < dates.length; jj++) {
+      var v = arr ? arr[di0 + jj] : null;
+      var col = '#16162a';
+      if (v != null && v > 0) {
+        var t = (mode === 'ratio') ? v : (Math.log(v) - lo) / (hi - lo);
+        col = (mode === 'ratio') ? mgnRatioColor(v) : mgnSeqColor(t);
+      }
+      ctx.fillStyle = col;
+      ctx.fillRect(padL + jj * cellW, y, Math.ceil(cellW) + 1, rowH - 1);
+    }
+  }
+  // 行标签
+  ctx.textAlign = 'right';
+  var fsize = Math.max(9, Math.min(12, rowH * 0.8));
+  ctx.font = fsize + 'px sans-serif';
+  for (var k = 0; k < codes.length; k++) {
+    var rec = MGN.ind[codes[k]];
+    var v = rec[mode] ? rec[mode][Math.min(lastI, rec[mode].length - 1)] : null;
+    var disp = v == null ? '' : (mode === 'ratio' ? v.toFixed(2) + '%' : (v >= 1e8 ? (v/1e8).toFixed(0) + '亿' : (v/1e4).toFixed(0) + '万'));
+    ctx.fillStyle = '#c8cbe0';
+    ctx.fillText(rec.name, padL - 34, padT + k * rowH + rowH * 0.75);
+    ctx.fillStyle = '#788';
+    ctx.font = Math.max(8, fsize - 2) + 'px sans-serif';
+    ctx.fillText(disp, W - padR + 4, padT + k * rowH + rowH * 0.75);
+    ctx.font = fsize + 'px sans-serif';
+  }
+  // x轴
+  ctx.textAlign = 'left'; ctx.fillStyle = '#889';
+  var step = Math.max(1, Math.round(dates.length / (W > 1200 ? 20 : 12)));
+  for (var m = 0; m < dates.length; m += step) {
+    var d = dates[m];
+    ctx.fillText(d.substring(2, 4) + '/' + d.substring(4, 6), padL + m * cellW, H - 8);
+  }
+  MGN_IND_GEOM = { padL: padL, padT: padT, cellW: cellW, cellH: rowH, dates: dates, codes: codes, di0: di0 };
+  document.getElementById('mgnStatus').textContent = '行业 ' + MGN.dates[MGN.dates.length-1] + ' (深市T+1)';
+}
+var MGN_SCALE = null, MGN_IND_GEOM = null, MGN_STOCK_GEOM = null;
+function mgnDrawStock(){
+  var cv = document.getElementById('mgnStockCanvas');
+  if (!cv || !MGN || !CUR) return;
+  var mode = document.getElementById('mgnMode').value;
+  var rg = parseInt(document.getElementById('mgnRange').value);
+  var dates = MGN.dates.slice(rg > 0 ? Math.max(0, MGN.dates.length - rg) : 0);
+  var di0 = MGN.dates.length - dates.length;
+  var lastI = MGN.dates.length - 1;
+  // 当前行业个股(取热力图CUR.stocks顺序 ∩ margin有数据), 按最新mode值降序
+  var rows = [];
+  CUR.stocks.forEach(function(st){
+    var m = MGN.stock[st.ts_code];
+    if (!m) return;
+    var v = m[mode] ? m[mode][Math.min(lastI, m[mode].length - 1)] : null;
+    rows.push({ ts: st.ts_code, name: st.name, m: m, v: v == null ? -1 : v });
+  });
+  rows.sort(function(a, b){ return b.v - a.v; });
+  var dpr = window.devicePixelRatio || 1;
+  var rect = cv.getBoundingClientRect();
+  var rowH = rows.length <= 40 ? 16 : (rows.length <= 80 ? 13 : 10);
+  var padL = 150, padR = 56, padT = 6, padB = 20;
+  var H = Math.max(40, padT + padB + rows.length * rowH);
+  cv.style.height = H + 'px';
+  cv.width = rect.width * dpr; cv.height = H * dpr;
+  var ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var W = rect.width;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+  var cellW = (W - padL - padR) / dates.length;
+  var lo = MGN_SCALE ? MGN_SCALE.lo : 0, hi = MGN_SCALE ? MGN_SCALE.hi : 1;
+  for (var i = 0; i < rows.length; i++) {
+    var arr = rows[i].m[mode];
+    var y = padT + i * rowH;
+    for (var jj = 0; jj < dates.length; jj++) {
+      var v = arr ? arr[di0 + jj] : null;
+      var col = '#16162a';
+      if (v != null && v > 0) {
+        var t = (mode === 'ratio') ? v : (Math.log(v) - lo) / (hi - lo);
+        col = (mode === 'ratio') ? mgnRatioColor(v) : mgnSeqColor(t);
+      }
+      ctx.fillStyle = col;
+      ctx.fillRect(padL + jj * cellW, y, Math.ceil(cellW) + 1, rowH - 1);
+    }
+  }
+  ctx.textAlign = 'right';
+  var fsize = Math.max(9, Math.min(12, rowH * 0.8));
+  ctx.font = fsize + 'px sans-serif';
+  for (var k = 0; k < rows.length; k++) {
+    var r = rows[k];
+    var v = r.m[mode] ? r.m[mode][Math.min(lastI, r.m[mode].length - 1)] : null;
+    var disp = v == null ? '' : (mode === 'ratio' ? v.toFixed(2) + '%' : (v >= 1e8 ? (v/1e8).toFixed(1) + '亿' : (v/1e4).toFixed(0) + '万'));
+    ctx.fillStyle = '#c8cbe0';
+    ctx.fillText(r.name, padL - 34, padT + k * rowH + rowH * 0.75);
+    ctx.fillStyle = '#788';
+    ctx.font = Math.max(8, fsize - 2) + 'px sans-serif';
+    ctx.fillText(disp, W - padR + 4, padT + k * rowH + rowH * 0.75);
+    ctx.font = fsize + 'px sans-serif';
+  }
+  ctx.textAlign = 'left'; ctx.fillStyle = '#889';
+  var step = Math.max(1, Math.round(dates.length / (W > 1200 ? 20 : 12)));
+  for (var m = 0; m < dates.length; m += step) {
+    var d2 = dates[m];
+    ctx.fillText(d2.substring(2, 4) + '/' + d2.substring(4, 6), padL + m * cellW, H - 8);
+  }
+  MGN_STOCK_GEOM = { padL: padL, padT: padT, cellW: cellW, cellH: rowH, dates: dates, rows: rows, di0: di0 };
+  document.getElementById('mgnStockHint').textContent = '· ' + CUR.industry + ' ' + rows.length + '只(两融标的) · ' + MGN.dates[MGN.dates.length-1];
+}
+function mgnDrawAll(){ mgnDrawInd(); mgnDrawStock(); }
+
+// 杠杆热力图交互: hover读值 + 点行切换行业
+(function(){
+  function bindCv(cvId, isInd){
+    var cv = document.getElementById(cvId);
+    if (!cv || cv.__mgbound) return; cv.__mgbound = true;
+    var tip = document.getElementById('tip');
+    cv.addEventListener('mousemove', function(e){
+      var G = isInd ? MGN_IND_GEOM : MGN_STOCK_GEOM;
+      if (!G || !MGN) { return; }
+      var rect = cv.getBoundingClientRect();
+      var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      var i = Math.floor((my - G.padT) / G.cellH);
+      var jj = Math.floor((mx - G.padL) / G.cellW);
+      if (i < 0 || jj < 0 || jj >= G.dates.length) { tip.style.display = 'none'; return; }
+      var d = G.dates[jj], mode = document.getElementById('mgnMode').value;
+      var rec, name, v_rz, v_rq, v_rt;
+      if (isInd){
+        if (i >= G.codes.length) { tip.style.display = 'none'; return; }
+        var c = G.codes[i]; rec = MGN.ind[c]; name = rec.name;
+      } else {
+        if (i >= G.rows.length) { tip.style.display = 'none'; return; }
+        var r = G.rows[i]; rec = MGN.stock[r.ts]; name = r.name + ' (' + r.ts.substring(0,6) + ')';
+      }
+      var ai = G.di0 + jj;
+      function pick(arr){ return arr && arr[ai] != null ? arr[ai] : null; }
+      v_rz = pick(rec.rzye); v_rq = pick(rec.rqye); v_rt = pick(rec.ratio);
+      var fmt = function(v, unit){ return v == null ? '—' : (v >= 1e8 ? (v/1e8).toFixed(2) + '亿' : (v/1e4).toFixed(0) + '万') + unit; };
+      tip.innerHTML = '<b style="color:#cde">' + name + '</b> · ' + d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6) + '<br>' +
+        '融资余额 <b style="color:#f9c">' + fmt(v_rz, '') + '</b> · 融券余额 <b style="color:#c9f">' + fmt(v_rq, '') + '</b><br>' +
+        '券融比 <b style="color:#fc9">' + (v_rt == null ? '—' : v_rt.toFixed(3) + '%') + '</b>' +
+        '<br><span style="color:#667">' + (isInd ? '点击行 → 切换行业' : '') + '</span>';
+      var tx = e.clientX + 14, ty = e.clientY + 14;
+      if (tx + 250 > window.innerWidth) tx = e.clientX - 240;
+      if (ty + 90 > window.innerHeight) ty = e.clientY - 80;
+      tip.style.display = 'block'; tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+    });
+    cv.addEventListener('mouseleave', function(){ var tip = document.getElementById('tip'); if (tip) tip.style.display = 'none'; });
+    if (isInd){
+      cv.addEventListener('click', function(e){
+        var G = MGN_IND_GEOM;
+        if (!G) return;
+        var rect = cv.getBoundingClientRect();
+        var i = Math.floor((e.clientY - rect.top - G.padT) / G.cellH);
+        if (i < 0 || i >= G.codes.length) return;
+        var code = G.codes[i];
+        if (location.hash !== '#' + code) location.hash = '#' + code;
+        loadIndustry(code);
+      });
+    }
+  }
+  // 延迟绑定(等DOM)
+  setTimeout(function(){ bindCv('mgnIndCanvas', true); bindCv('mgnStockCanvas', false); }, 300);
+})();
+
 
 // ═══ v2 浮窗: THS行业指数日线K线(交互) + 评分排名副图 ═══
 var IMK = null;        // {rows:[{d,o,h,l,c,v,a}], view:{i0,i1}, drag, cross}
@@ -1467,6 +1715,10 @@ fetch('stock_heat_tier.json?_=' + Date.now())
   document.getElementById(id).addEventListener('change', function() { draw(); drawRowTier(); });
 });
 window.addEventListener('resize', function(){ if (CUR) { draw(); drawRowTier(); } if (TIER) drawTierAll(); });
+['mgnMode','mgnRange'].forEach(function(id) {
+  document.getElementById(id).addEventListener('change', function() { mgnDrawAll(); });
+});
+mgnLoad(function(){ mgnDrawAll(); });
 document.getElementById('metricSel').addEventListener('change', function() {
   document.getElementById('scaleSel').style.display = (this.value === 'pct') ? '' : 'none';
 });

@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-from pathlib import Path
-import os
-BASE_DIR = str(Path(__file__).resolve().parent)
-
 """
 场内外流动性数据采集 + 计算
 数据源: akshare (免费无限制) + 已有tushare缓存
-输出: <repo>/liquidity.json
+输出: /mnt/e/stockSurface/liquidity.json
 """
 import akshare as ak
+from datetime import datetime as _dt
+_END = _dt.now().strftime('%Y%m%d')
 import pandas as pd
 import numpy as np
 import json, os, sys, time, warnings
 warnings.filterwarnings('ignore')
 
-OUT = os.path.join(BASE_DIR, 'liquidity.json')
-CACHE_DIR = os.path.join(BASE_DIR, 'cache_liquidity')
+OUT = '/mnt/e/stockSurface/liquidity.json'
+CACHE_DIR = '/mnt/e/stockSurface/cache_liquidity'
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def cache_path(name):
@@ -52,7 +50,7 @@ def fetch_margin():
 def fetch_margin_total():
     """沪深两市融资融券汇总"""
     try:
-        df = ak.stock_margin_sse(start_date='20150101', end_date='20260728')
+        df = ak.stock_margin_sse(start_date='20150101', end_date=_END)
         return df
     except:
         return None
@@ -97,7 +95,7 @@ if shibor is not None:
 # ════════════════════════════════════
 print("\n4. 国债收益率...")
 def fetch_bond_yield():
-    return ak.bond_china_yield(start_date="20150101", end_date="20260728")
+    return ak.bond_china_yield(start_date="20150101", end_date=_END)
 bond = load_or_fetch('bond_yield.csv', fetch_bond_yield, ttl_days=7)
 if bond is not None:
     print(f"  国债收益率: {len(bond)} rows, cols={list(bond.columns)[:8]}")
@@ -106,7 +104,7 @@ if bond is not None:
 # 5. 全市场成交额 (已有缓存)
 # ════════════════════════════════════
 print("\n5. 全市场成交额...")
-df_all = pd.read_parquet(os.path.join(BASE_DIR, 'cache_td_v2.parquet'))
+df_all = pd.read_parquet('/mnt/e/stockSurface/cache_td_v2.parquet')
 df_all['amount_yuan'] = df_all['amount'] * 1000.0
 daily_amt = df_all.groupby('trade_date')['amount_yuan'].sum().reset_index()
 daily_amt.columns = ['date', 'total_amount']
@@ -363,7 +361,13 @@ output = {
 }
 
 with open(OUT, 'w') as f:
-    json.dump(output, f, ensure_ascii=False, allow_nan=False)
+    def _clean(o):
+        import math
+        if isinstance(o, dict): return {k: _clean(v) for k, v in o.items()}
+        if isinstance(o, list): return [_clean(v) for v in o]
+        if isinstance(o, float) and (math.isnan(o) or math.isinf(o)): return None
+        return o
+    json.dump(_clean(output), f, ensure_ascii=False, allow_nan=False)
 sz = os.path.getsize(OUT) / 1024
 print(f"\n✅ {OUT} ({sz:.0f}KB)")
 print(f"   {len(out_list)} 天 ({out_list[0]['date']}~{out_list[-1]['date']})")

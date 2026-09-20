@@ -4,18 +4,14 @@
 新增: M2/M1/M0、社融、外汇储备、中美国债收益率曲线
 输出: 合并到 liquidity.json
 """
-from pathlib import Path
-import os
-BASE_DIR = str(Path(__file__).resolve().parent)
-
 import akshare as ak
 import pandas as pd
 import numpy as np
 import json, os, time, warnings
 warnings.filterwarnings('ignore')
 
-CACHE = os.path.join(BASE_DIR, 'cache_liquidity')
-OUT = os.path.join(BASE_DIR, 'liquidity.json')
+CACHE = '/mnt/e/stockSurface/cache_liquidity'
+OUT = '/mnt/e/stockSurface/liquidity.json'
 os.makedirs(CACHE, exist_ok=True)
 
 def load_csv(name):
@@ -70,12 +66,17 @@ m2_out['m1_m2_scissors'] = m2_out['m1_yoy'] - m2_out['m2_yoy']
 m2_out = m2_out.dropna(subset=['m2']).reset_index(drop=True)
 print(f"  M2: {len(m2_out)} 月, {m2_out['month'].iloc[0]}~{m2_out['month'].iloc[-1]}")
 
-# 映射到日度 (月度数据forward-fill到该月所有交易日)
+# 映射到日度 (月度数据forward-fill: 该月所有交易日 + 数据未发布的新月份日期沿用最近已知月)
 m2_map = m2_out.set_index('month').to_dict('index')
+m2_months = sorted(m2_map.keys())
 for _, row in df_main.iterrows():
     ym = row['date'][:6]
-    if ym in m2_map:
-        d = m2_map[ym]
+    key = ym if ym in m2_map else None
+    if key is None:   # 找<=ym的最近月份(跨未发布月沿用)
+        prior = [m for m in m2_months if m <= ym]
+        key = prior[-1] if prior else None
+    if key:
+        d = m2_map[key]
         df_main.loc[df_main['date'] == row['date'], 'm2'] = d['m2']
         df_main.loc[df_main['date'] == row['date'], 'm2_yoy'] = d['m2_yoy']
         df_main.loc[df_main['date'] == row['date'], 'm1'] = d['m1']
@@ -102,8 +103,12 @@ sf_out['sf_total_12m'] = sf_out['sf_total'].rolling(12, min_periods=6).mean()
 print(f"  社融: {len(sf_out)} 月")
 
 sf_map = sf_out.set_index('month').to_dict('index')
+sf_months = sorted(sf_map.keys())
 for _, row in df_main.iterrows():
     ym = row['date'][:6]
+    if ym not in sf_map:
+        prior = [m for m in sf_months if m <= ym]
+        ym = prior[-1] if prior else None
     if ym in sf_map:
         d = sf_map[ym]
         for col in ['sf_total', 'sf_loan', 'sf_bond', 'sf_equity', 'sf_total_12m']:
@@ -126,9 +131,13 @@ fx_out = fx[['month', 'fx_reserve']].dropna(subset=['fx_reserve']).reset_index(d
 print(f"  外汇: {len(fx_out)} 月")
 
 fx_map = fx_out.set_index('month').to_dict('index')
+fx_months = sorted(fx_map.keys())
 for _, row in df_main.iterrows():
     ym = row['date'][:6]
-    if ym in fx_map:
+    if ym not in fx_map:
+        prior = [m for m in fx_months if m <= ym]
+        ym = prior[-1] if prior else None
+    if ym and ym in fx_map:
         df_main.loc[df_main['date'] == row['date'], 'fx_reserve'] = fx_map[ym]['fx_reserve']
 
 # ════════════════════════════════════

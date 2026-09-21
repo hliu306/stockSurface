@@ -7,8 +7,8 @@ D1=$(date -d "-9 days" +%Y%m%d)
 D2=$(date +%Y%m%d)
 BAK=/mnt/e/backup/stockheat_20260919
 mkdir -p $BAK
-/usr/bin/python3.12 /mnt/e/stockSurface/margin_fetch.py "$D1" "$D2" >> $LOG 2>&1 || { echo "MARGIN_FETCH_FAIL" | mail -s "[stockheat] margin_daily 拉取失败 $(date +%F)" hongbo_liu@163.com; exit 1; }
-/usr/bin/python3.12 /mnt/e/stockSurface/margin_build.py >> $LOG 2>&1 || { echo "MARGIN_BUILD_FAIL" | mail -s "[stockheat] margin_daily 聚合失败 $(date +%F)" hongbo_liu@163.com; exit 1; }
+/usr/bin/python3.12 /mnt/e/stockSurface/margin_fetch.py "$D1" "$D2" >> $LOG 2>&1 || { /mnt/e/stockSurface/alert.sh FETCH_FAIL "margin_daily 拉取失败 $(date +%F)"; exit 1; }
+/usr/bin/python3.12 /mnt/e/stockSurface/margin_build.py >> $LOG 2>&1 || { /mnt/e/stockSurface/alert.sh BUILD_FAIL "margin_daily 聚合失败 $(date +%F)"; exit 1; }
 N=$(ls /mnt/e/stockSurface/margin_detail/*.parquet 2>/dev/null | wc -l)
 J=$(stat -c %s /mnt/e/stockSurface/margin_heat.json 2>/dev/null || echo 0)
 # 三重校验: json可读+dates尾对齐最新parquet+两文件大小合理
@@ -28,7 +28,7 @@ except Exception as e:
 PYCHK
 )
 if [ "$V" != "OK" ]; then
-  echo "MARGIN_VERIFY_FAIL $V" | mail -s "[stockheat] margin_daily 校验失败 $(date +%F)" hongbo_liu@163.com
+  /mnt/e/stockSurface/alert.sh VERIFY_FAIL "margin_daily 校验失败 $(date +%F) $V"
   cp $BAK/margin_heat_full.json /mnt/e/stockSurface/ 2>/dev/null && echo "$(date '+%F %T') 已回滚full备份" >> $LOG
   exit 1
 fi

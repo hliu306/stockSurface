@@ -29,10 +29,10 @@ except Exception:
     if [ "$T" = "True" ]; then
       echo "$(date '+%F %T') margin_watch: 当日$D已入json OK" >> /tmp/margin_daily.log
     else
-      echo "MARGIN_WATCH_BUILD_BAD" | mail -s "[stockheat] margin_watch 当日未入json $D" hongbo_liu@163.com
+      /mnt/e/stockSurface/alert.sh WATCH_BUILD_BAD "margin_watch 当日未入json $D"
     fi
     exit 0
   fi
   sleep 60
 done
-echo "MARGIN_WATCH_TIMEOUT" | mail -s "[stockheat] margin_watch 2小时未见当日数据 $D" hongbo_liu@163.com
+/mnt/e/stockSurface/alert.sh WATCH_TIMEOUT "margin_watch 2小时未见当日数据 $D"

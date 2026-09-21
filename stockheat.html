@@ -1908,6 +1908,7 @@ function openStockSubPage(st){
 
 function drawIndModal(code, name){
   var _db2 = document.getElementById('imDevia'); if (_db2) _db2.style.display = 'none';
+  SMD = null;   // 清个股浮窗态(否则残留SMD的mousemove/smgDraw会把K线重画成收盘折线)
   ensureModalDom();
   MODAL.dataset.code = code;
   MODAL.style.display = 'flex';

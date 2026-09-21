@@ -89,7 +89,7 @@ for tc, r in stock_out.items():
 with open(BASE+'/margin_heat_full.json','w') as f: json.dump(full, f, ensure_ascii=False, separators=(',',':'))
 # 页面版: 行业全程(千元) + 个股近250日
 KEEP = 250
-page = {'dates': [str(d) for d in dates], 'stockDates': [int(d) for d in dates[-KEEP:]], 'ind': full['ind'], 'stock': {}}
+page = {'dates': [str(d) for d in dates], 'stockDates': [str(d) for d in dates[-KEEP:]], 'ind': full['ind'], 'stock': {}}
 for tc, r in full['stock'].items():
     page['stock'][tc] = {'name': r['name'], 'ind': r['ind'],
         'rzye': r['rzye'][-KEEP:], 'rqye': r['rqye'][-KEEP:], 'ratio': r['ratio'][-KEEP:]}

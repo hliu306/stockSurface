@@ -38,6 +38,10 @@ D1=$(date -d "-9 days" +%Y%m%d)
 /usr/bin/python3.12 $BASE/ths_kline_daily.py >> $LOG 2>&1 || {
   bash $ALERT KLINE_FAIL "ths_kline日更退出码非0"; }
 
+# ②c 板块强度页数据重建(sector_strength.html 数据源)
+/usr/bin/python3.12 $BASE/sector_close_build.py >> $LOG 2>&1 || {
+  bash $ALERT SECTOR_FAIL "sector_close构建退出码非0"; }
+
 # ③ 校验(同margin_daily.sh三重)
 V=$(/usr/bin/python3.12 - << 'PYCHK'
 import json, os, glob

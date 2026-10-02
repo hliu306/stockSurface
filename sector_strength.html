@@ -86,6 +86,7 @@ var CR=[];
 // 配色: 冷暖渐变按排名分配(涨=红暖, 跌=绿冷, 中间灰) — A股习惯红涨绿跌
 var HI=null;   // 选中高亮的行业code (null=全部彩色)
 var HOV=null;  // 图例悬停的行业code (临时强调, 不改选中)
+var SEL={};    // 多选集合: code→true (勾选的保持彩色, 未勾的灰显; 空=全部彩色)
 function rankColors(n){
   var arr=[];
   for(var i=0;i<n;i++){
@@ -195,14 +196,17 @@ function drawChart(dates, series, chg){
     ctx.fillText(fmtDate(dates[i]).slice(2), X(i)-22, 612);
     ctx.strokeStyle='#161b22'; ctx.beginPath(); ctx.moveTo(X(i),padT); ctx.lineTo(X(i),620-padB); ctx.stroke();
   }
-  // 曲线(弱的先画,强的后画盖上面; 选中态: 选中线加粗亮色最后画, 其余灰; 悬停态: 悬停线亮, 其余半灰)
+  // 曲线(弱的先画,强的后画盖上面; 多选过滤: 只勾选的彩色; 单选高亮: 选中线加粗, 其余灰; 悬停: 悬停线亮)
   var focus = HI || HOV;   // 当前强调对象(优先选中)
+  var hasSel = Object.keys(SEL).length>0;
   var drawOrder = ranked.slice().reverse();
   drawOrder.forEach(function(c){
     var vals=series[c]; if(!vals) return;
-    var dim = focus && focus!==c;
-    ctx.strokeStyle = dim ? 'rgba(139,148,158,'+(HI?0.16:0.38)+')' : colors[c];
-    ctx.lineWidth = (focus===c) ? 2.8 : 1.3;
+    var dim = (hasSel && !SEL[c]) || (focus && focus!==c && !hasSel);
+    var alpha = (hasSel && !SEL[c]) ? 0.10 : ((focus && focus!==c) ? 0.38 : 1);
+    ctx.strokeStyle = dim ? 'rgba(139,148,158,'+alpha+')' : colors[c];
+    ctx.lineWidth = (focus===c || (hasSel && SEL[c])) ? 2.2 : 1.3;
+    if(focus===c) ctx.lineWidth=2.8;
     ctx.beginPath(); var started=false;
     for(var i=0;i<vals.length;i++){ var v=vals[i]; if(v==null){started=false;continue;}
       var x=X(i), y=Y(v);
@@ -221,8 +225,10 @@ function drawChart(dates, series, chg){
     ctx.stroke(); ctx.restore();
     if(hLastI>=0){ ctx.fillStyle=colors[focus]; ctx.beginPath(); ctx.arc(X(hLastI),Y(hv[hLastI]),4,0,7); ctx.fill(); }
   }
-  // 右缘标签(排名前12+后4; 强调行业恒显)
-  var labelSet = ranked.slice(0,12).concat(SORT==='code'?[]:ranked.slice(-4));
+  // 右缘标签(排名前12+后4; 强调行业恒显; 多选时只标勾选的)
+  var labelSet;
+  if(hasSel){ labelSet = ranked.filter(function(c){ return SEL[c]; }); }
+  else { labelSet = ranked.slice(0,12).concat(SORT==='code'?[]:ranked.slice(-4)); }
   if(focus && labelSet.indexOf(focus)<0) labelSet=labelSet.concat([focus]);
   labelSet.forEach(function(c){
     var vals=series[c]; var lastV=null, lastI=0;
@@ -280,7 +286,7 @@ function drawLegend(chg, dates){
   var list=ranked.filter(function(c){ return !q || (NAMES[c]||'').indexOf(q)>=0 || c.indexOf(q)>=0; });
   // 无数据行业(后上市)追加灰列尾部
   var noData=Object.keys(chg).filter(function(c){return chg[c]==null;});
-  document.getElementById('legendBody').innerHTML =
+  var html =
     list.map(function(c,i){
       return '<div class="lgRow'+(HI===c?' hi':'')+(HI&&HI!==c?' dim':'')+'" data-c="'+c+'">'+
         '<span style="width:22px;color:#8b949e;flex-shrink:0;font-size:10px">'+(i+1)+'</span>'+
@@ -295,6 +301,10 @@ function drawLegend(chg, dates){
         '<span class="lnm">'+(NAMES[c]||c)+'</span>'+
         '<span class="lpc" style="color:#6e7681">—</span></div>';
     }).join('') : '');
+  // 关键: HTML未变(如仅悬停HOV变化)时跳过重建 — 重建会销毁鼠标下的元素再触发mouseenter→render死循环, click事件永远配不成对
+  if(drawLegend._last === html) return;
+  drawLegend._last = html;
+  document.getElementById('legendBody').innerHTML = html;
   document.querySelectorAll('#legendBody .lgRow').forEach(function(el){
     el.onclick=function(){
       var c=el.dataset.c;

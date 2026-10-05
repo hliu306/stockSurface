@@ -28,7 +28,8 @@ h1{font-size:20px;margin-bottom:4px;}
 select{background:#0d1117;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:13px;}
 input[type=text]{background:#0d1117;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:13px;width:120px;}
 .legend{font-size:12px;color:var(--tx2);}
-#main{width:100%;border:1px solid var(--bd);border-radius:10px;background:var(--panel);cursor:crosshair;}
+#main{width:100%;border:1px solid var(--bd);border-radius:10px 10px 0 0;background:var(--panel);cursor:crosshair;}
+#sub{width:100%;border:1px solid var(--bd);border-top:0;border-radius:0 0 10px 10px;background:var(--panel);cursor:crosshair;margin-top:-1px;display:block;}
 #rankWrap{margin-top:14px;background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;max-height:340px;overflow-y:auto;}
 #rankWrap h3{font-size:14px;margin-bottom:8px;color:var(--tx);}
 .rankRow{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px;}
@@ -58,7 +59,6 @@ input[type=text]{background:#0d1117;color:var(--tx);border:1px solid var(--bd);b
     <button data-m="norm" class="on">净值化(起点=1)</button>
     <button data-m="excess">相对沪深300超额</button>
     <button data-m="raw">原始收盘</button>
-    <button data-m="vol">波动率(年化)</button>
   </div>
   <span class="legend">基准</span>
   <select id="benchSel"></select>
@@ -72,7 +72,8 @@ input[type=text]{background:#0d1117;color:var(--tx);border:1px solid var(--bd);b
 
 <div class="layout">
 <div class="chartCol">
-<canvas id="main" height="620"></canvas>
+<canvas id="main" height="460"></canvas>
+<canvas id="sub" height="200"></canvas>
 </div>
 <div id="legendCol"><h4>图例 · 点选高亮 (双击放大)</h4><div id="legendBody"></div></div>
 </div>
@@ -85,6 +86,7 @@ var DATA=null, CODES=[], NAMES={}, RANGE=250, MODE='norm', BENCH='000300', SORT=
 var VOLW=60;   // 波动率窗口: 60日滚动日收益std, 年化×√250; burn-in用窗前历史, 窗首即有值
 var RANGES=[['60日',60],['一年',250],['两年',500],['四年',1000],['全部',99999]];
 var CR=[];
+var CRSUB=null;   // 副图(波动率)状态: 供悬停读值
 // 配色: 冷暖渐变按排名分配(涨=红暖, 跌=绿冷, 中间灰) — A股习惯红涨绿跌
 var HI=null;   // 选中高亮的行业code (null=全部彩色)
 var HOV=null;  // 图例悬停的行业code (临时强调, 不改选中)
@@ -139,7 +141,7 @@ function render(){
   if(!DATA) return;
   var dates=DATA.dates.slice(Math.max(0,DATA.dates.length-RANGE));
   var i0=DATA.dates.length-dates.length;
-  var series={}, chg={};
+  var series={}, chg={}, volSeries={};
   var bench=benchSeries(dates);
   CODES.forEach(function(c){
     var ser=DATA.series[c];
@@ -150,33 +152,28 @@ function render(){
     // 窗内完整数据判定: 首日即有值(或首日起历史更短但起点<=窗首) — 排名只纳入可比行业
     var firstIdx=-1; for(var fi=0; fi<vals.length; fi++){ if(vals[fi]!=null){ firstIdx=fi; break; } }
     var complete = firstIdx===0;
-    if(MODE==='vol'){
-      // 波动率: 全历史close算日收益(对数), 窗内每个日期取其前VOLW个收益的std, 年化×√250
-      // burn-in用窗前历史 → 窗首即有值(只要历史够长)
-      var allD=DATA.dates;                       // 全局轴
+    // 波动率副图(始终计算): 全历史close→对数日收益, 窗内每日期取前VOLW个收益std, 年化×√250
+    {
+      var allD=DATA.dates;
       var cl=allD.map(function(d){ return (d in dmap)? dmap[d] : null; });
-      var vols=[], rets=[];
+      var rets=[];
       for(var vi=0; vi<allD.length; vi++){
         var p0=cl[vi-1], p1=cl[vi];
         if(p0!=null && p1!=null && p0>0) rets.push(Math.log(p1/p0)); else rets.push(null);
       }
-      // rets[i]对应allD[i]的日收益; 窗内日期vi>=i0
+      var vols=[];
       for(var wi=0; wi<dates.length; wi++){
         var gi=i0+wi;
         if(cl[gi]==null){ vols.push(null); continue; }
-        var sum=0, n=0, arr=[];
+        var arr=[];
         for(var k=gi-VOLW+1; k<=gi; k++){ if(k>=0 && rets[k]!=null){ arr.push(rets[k]); } }
-        if(arr.length>=VOLW*0.9){                 // 至少90%样本
+        if(arr.length>=VOLW*0.9){
           var m=arr.reduce(function(a,b){return a+b;},0)/arr.length;
           var vv=arr.reduce(function(a,b){ return a+(b-m)*(b-m); },0)/(arr.length-1);
           vols.push(Math.sqrt(vv)*Math.sqrt(250));
         } else vols.push(null);
       }
-      series[c]=vols;
-      var z=null; for(var zi=vols.length-1; zi>=0; zi--){ if(vols[zi]!=null){ z=vols[zi]; break; } }
-      chg[c]=z;                                    // "涨幅"槽位放当前年化波动率, 排名=波动率高低
-      if(!complete) chg[c]=null;
-      return;
+      volSeries[c]=vols;
     }
     var base=null; if(firstIdx>=0) base=vals[firstIdx];
     if(MODE==='norm'){ vals=vals.map(function(v){ return (v!=null&&base)? v/base : null; }); }
@@ -188,16 +185,79 @@ function render(){
     if(!complete) chg[c]=null;   // 后上市(窗内起)不进排名, 曲线照画
   });
   drawChart(dates, series, chg);
+  drawSub(dates, volSeries, chg);
   drawRank(chg);
   drawLegend(chg, dates);
-  document.getElementById('metaNote').textContent='数据: ths_kline 90行业 · '+dates.length+'日 ('+fmtDate(dates[0])+' → '+fmtDate(dates[dates.length-1])+') · 模式='+({norm:'净值化',excess:'相对超额',raw:'原始',vol:'波动率(60日滚动年化)'})[MODE]+(MODE==='vol'?' · 高波动=红 高风险':'')+' · 悬停读值/点行业名放大';
+  document.getElementById('metaNote').textContent='数据: ths_kline 90行业 · '+dates.length+'日 ('+fmtDate(dates[0])+' → '+fmtDate(dates[dates.length-1])+') · 主图='+({norm:'净值化',excess:'相对超额',raw:'原始'})[MODE]+' · 副图=波动率(60日滚动年化) · 悬停读值/点行业名放大';
+}
+
+// 波动率副图: 与主图同X轴同配色, 上下对照涨跌节奏与波动节奏
+function drawSub(dates, volSeries, chg){
+  var cv=document.getElementById('sub');
+  var W=cv.clientWidth||1200; cv.width=W; cv.height=200;
+  var ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,W,200);
+  var padL=210, padR=150, padT=18, padB=24;
+  var n=dates.length;
+  var lo=Infinity, hi=-Infinity;
+  var order=Object.keys(volSeries);
+  order.forEach(function(c){ volSeries[c].forEach(function(v){ if(v!=null){ if(v<lo)lo=v; if(v>hi)hi=v; } }); });
+  if(!isFinite(lo)){lo=0;hi=1;}
+  var span=(hi-lo)||1; lo=Math.max(0,lo-span*0.03); hi+=span*0.03;
+  var X=function(i){ return padL+(W-padL-padR)*i/Math.max(1,n-1); };
+  var Y=function(v){ return padT+(200-padT-padB)*(1-(v-lo)/(hi-lo)); };
+  // 排名配色: 主图排名色(涨幅), 副图沿用 — 但按当前波动率高低给线宽提示
+  var ranked=order.slice().sort(function(a,b){ return (chg[b]==null?-99:chg[b])-(chg[a]==null?-99:chg[a]); });
+  var colors={}; rankColors(ranked.length).forEach(function(col,i){ colors[ranked[i]]=col; });
+  // 标题与Y轴
+  ctx.fillStyle='#8b949e'; ctx.font='11px sans-serif';
+  ctx.fillText('波动率(60日年化) ▼', padL+6, 13);
+  for(var g=0; g<=3; g++){
+    var v=lo+(hi-lo)*g/3, y=Y(v);
+    ctx.strokeStyle='#21262d'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle='#8b949e'; ctx.fillText((v*100).toFixed(0)+'%', 8, y+4);
+  }
+  // 曲线(与主图同drawOrder逻辑: 弱→强)
+  var focus = HI || HOV;
+  var hasSel = Object.keys(SEL).length>0;
+  var drawOrder = ranked.slice().reverse();
+  drawOrder.forEach(function(c){
+    var vals=volSeries[c]; if(!vals) return;
+    var dim = (hasSel && !SEL[c]) || (focus && focus!==c && !hasSel);
+    var alpha = (hasSel && !SEL[c]) ? 0.10 : ((focus && focus!==c) ? 0.38 : 1);
+    ctx.strokeStyle = dim ? 'rgba(139,148,158,'+alpha+')' : colors[c];
+    ctx.lineWidth = (focus===c || (hasSel && SEL[c])) ? 2.4 : 1.1;
+    if(focus===c) ctx.lineWidth=3.0;
+    ctx.beginPath(); var started=false;
+    for(var i=0;i<vals.length;i++){ var v=vals[i]; if(v==null){started=false;continue;}
+      var x=X(i), y=Y(v);
+      if(!started){ ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y); }
+    ctx.stroke();
+  });
+  // 右缘: 当前波动率Top3标签(或选中/勾选行业)
+  var vNow={};
+  order.forEach(function(c){ var z=null; for(var i=volSeries[c].length-1;i>=0;i--){ if(volSeries[c][i]!=null){z=volSeries[c][i];break;} } if(z!=null) vNow[c]=z; });
+  var vRanked=Object.keys(vNow).sort(function(a,b){ return vNow[b]-vNow[a]; });
+  var labelSet = hasSel ? vRanked.filter(function(c){return SEL[c];}).slice(0,12)
+              : vRanked.slice(0,3).concat(focus&&vNow[focus]!=null&&vRanked.indexOf(focus)>2?[focus]:[]);
+  labelSet.forEach(function(c){
+    var z=null, zi=-1;
+    for(var i=volSeries[c].length-1;i>=0;i--){ if(volSeries[c][i]!=null){z=volSeries[c][i];zi=i;break;} }
+    if(z==null) return;
+    var y=Y(z);
+    ctx.fillStyle = (focus && focus!==c) ? 'rgba(139,148,158,0.35)' : colors[c];
+    ctx.font=(focus===c)?'bold 12px sans-serif':'bold 10px sans-serif';
+    ctx.fillText((NAMES[c]||c)+' '+(z*100).toFixed(0)+'%', W-padR+6, y+3);
+  });
+  CRSUB={dates:dates, series:volSeries, order:ranked, colors:colors, X:X, Y:Y, vNow:vNow, padL:padL, padR:padR};
+  bindSubHover();
 }
 
 function drawChart(dates, series, chg){
   var cv=document.getElementById('main');
-  var W=cv.clientWidth||1200; cv.width=W; cv.height=620;
+  var W=cv.clientWidth||1200; cv.width=W; cv.height=460;
   var ctx=cv.getContext('2d');
-  ctx.clearRect(0,0,W,620);
+  ctx.clearRect(0,0,W,460);
   var padL=210, padR=150, padT=26, padB=30;
   var n=dates.length;
   // y域
@@ -207,7 +267,7 @@ function drawChart(dates, series, chg){
   if(!isFinite(lo)){lo=0;hi=1;}
   var span=(hi-lo)||1; lo-=span*0.03; hi+=span*0.03;
   var X=function(i){ return padL+(W-padL-padR)*i/Math.max(1,n-1); };
-  var Y=function(v){ return padT+(620-padT-padB)*(1-(v-lo)/(hi-lo)); };
+  var Y=function(v){ return padT+(460-padT-padB)*(1-(v-lo)/(hi-lo)); };
   // 排名配色
   var ranked=order.slice().sort(function(a,b){ return (chg[b]==null?-99:chg[b])-(chg[a]==null?-99:chg[a]); });
   var colors={}; rankColors(ranked.length).forEach(function(col,i){ colors[ranked[i]]=col; });
@@ -223,8 +283,8 @@ function drawChart(dates, series, chg){
   // x刻度 6段
   for(var gx=0; gx<=5; gx++){
     var i=Math.round((n-1)*gx/5);
-    ctx.fillText(fmtDate(dates[i]).slice(2), X(i)-22, 612);
-    ctx.strokeStyle='#161b22'; ctx.beginPath(); ctx.moveTo(X(i),padT); ctx.lineTo(X(i),620-padB); ctx.stroke();
+    ctx.fillText(fmtDate(dates[i]).slice(2), X(i)-22, 452);
+    ctx.strokeStyle='#161b22'; ctx.beginPath(); ctx.moveTo(X(i),padT); ctx.lineTo(X(i),460-padB); ctx.stroke();
   }
   // 曲线(弱的先画,强的后画盖上面; 多选过滤: 只勾选的彩色; 单选高亮: 选中线加粗, 其余灰; 悬停: 悬停线亮)
   var focus = HI || HOV;   // 当前强调对象(优先选中)
@@ -382,8 +442,11 @@ function bindHover(){
     });
     cand.sort(function(a,b){return a.dy-b.dy;});
     var top=cand.slice(0,3);
-    var h='<b>'+fmtDate(CR.dates[i])+'</b> · '+({norm:'净值',excess:'相对比',raw:'收盘',vol:'年化波动率'})[MODE]+'<table>'+
-      top.map(function(t){ return '<tr><td style="color:'+CR.colors[t.c]+'">'+(NAMES[t.c]||t.c)+'</td><td>'+t.v.toFixed(MODE==='raw'?0:(MODE==='vol'?3:3))+'</td><td class="'+(CR.chg[t.c]>=0?'pos':'neg')+'">'+(MODE==='vol' ? (CR.chg[t.c]*100).toFixed(1)+'%' : fmtPct(CR.chg[t.c]||0))+'</td></tr>'; }).join('')+
+    var h='<b>'+fmtDate(CR.dates[i])+'</b> · '+({norm:'净值',excess:'相对比',raw:'收盘'})[MODE]+'<table>'+
+      '<tr><th></th><th>'+({norm:'净值',excess:'相对比',raw:'收盘'})[MODE]+'</th><th>区间涨幅</th><th>波动率</th></tr>'+
+      top.map(function(t){
+        var v=CRSUB&&CRSUB.series[t.c]?CRSUB.series[t.c][i]:null;
+        return '<tr><td style="color:'+CR.colors[t.c]+'">'+(NAMES[t.c]||t.c)+'</td><td>'+t.v.toFixed(MODE==='raw'?0:3)+'</td><td class="'+(CR.chg[t.c]>=0?'pos':'neg')+'">'+fmtPct(CR.chg[t.c]||0)+'</td><td style="color:#d29922">'+(v!=null?(v*100).toFixed(1)+'%':'—')+'</td></tr>'; }).join('')+
       '</table>';
     tip.innerHTML=h; tip.style.display='block';
     tip.style.left=Math.min(e.clientX+16, window.innerWidth-360)+'px';
@@ -402,6 +465,57 @@ function bindHover(){
     } else {
       HI=null; render();                // 点空白处清除选中
     }
+  };
+  cv.ondblclick=function(){ if(HI) zoomOne(HI); };
+  cv.onmouseleave=function(){ tip.style.display='none'; };
+}
+
+// 副图(波动率)悬停+点选: 与主图同语义
+function bindSubHover(){
+  var cv=document.getElementById('sub'), tip=document.getElementById('tip');
+  var nearestAt=function(mx,my){
+    if(!CRSUB) return null;
+    var rect=cv.getBoundingClientRect();
+    var n=CRSUB.dates.length;
+    var i=Math.round((mx-CRSUB.padL)/((cv.width-CRSUB.padL-CRSUB.padR)/Math.max(1,n-1)));
+    if(i<0||i>=n) return null;
+    var best=null;
+    CRSUB.order.forEach(function(c){
+      var v=CRSUB.series[c][i]; if(v==null) return;
+      var dy=Math.abs(CRSUB.Y(v)-my);
+      if(!best||dy<best.dy) best={c:c, dy:dy};
+    });
+    return best;
+  };
+  cv.onmousemove=function(e){
+    if(!CRSUB) return;
+    var rect=cv.getBoundingClientRect();
+    var mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    var n=CRSUB.dates.length;
+    var i=Math.round((mx-CRSUB.padL)/((cv.width-CRSUB.padL-CRSUB.padR)/Math.max(1,n-1)));
+    if(i<0||i>=n){ tip.style.display='none'; return; }
+    var cand=[];
+    CRSUB.order.forEach(function(c){
+      var v=CRSUB.series[c][i]; if(v==null) return;
+      cand.push({c:c, v:v, dy:Math.abs(CRSUB.Y(v)-my)});
+    });
+    cand.sort(function(a,b){return a.dy-b.dy;});
+    var top=cand.slice(0,3);
+    var h='<b>'+fmtDate(CRSUB.dates[i])+'</b> · 波动率(60日年化)<table>'+
+      top.map(function(t){ return '<tr><td style="color:'+CRSUB.colors[t.c]+'">'+(NAMES[t.c]||t.c)+'</td><td style="color:#d29922">'+(t.v*100).toFixed(1)+'%</td></tr>'; }).join('')+
+      '</table>';
+    tip.innerHTML=h; tip.style.display='block';
+    tip.style.left=Math.min(e.clientX+16, window.innerWidth-320)+'px';
+    tip.style.top=(e.clientY+14)+'px';
+    var nb=nearestAt(mx,my);
+    cv.title = nb ? '点击选中 '+(NAMES[nb.c]||nb.c) : '';
+  };
+  cv.onclick=function(e){
+    if(!CRSUB) return;
+    var rect=cv.getBoundingClientRect();
+    var nb=nearestAt(e.clientX-rect.left, e.clientY-rect.top);
+    if(nb && nb.dy<18){ HI = (HI===nb.c) ? null : nb.c; render(); }
+    else { HI=null; render(); }
   };
   cv.ondblclick=function(){ if(HI) zoomOne(HI); };
   cv.onmouseleave=function(){ tip.style.display='none'; };

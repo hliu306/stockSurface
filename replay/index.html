@@ -811,10 +811,9 @@ function bind(){
     var oldV=VIEW;
     var nv = ev.deltaY<0? Math.round(VIEW*0.85) : Math.round(VIEW*1.18);
     nv=Math.max(40, Math.min(600, nv));
+    nv=Math.min(nv, IDX+1);   // ★回放纪律: 窗口最多容纳已回放的IDX+1根 — 头部时缩放被钳制, IDX永不前进
     if(nv===oldV) return;
     VIEW=nv;
-    // 回放纪律: IDX(回放截止)不动 — 缩放只向左扩展/收缩历史, 永不暴露未回放K线
-    if(IDX<VIEW-1) IDX=VIEW-1;   // 仅当历史不足时窗左移到头(IDX仍=数据允许的最小, 不前进)
     drawAll();
   }, {passive:false});
 }

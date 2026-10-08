@@ -221,16 +221,18 @@ function drawHeat(){
   HM.rows=order;
   var padL=PADL, padR=PADR, padT=0;
   var cw=(W-padL-padR)/VIEW;
+  var off=VIEW-cols.length;   // 历史不足时左空off列, 右缘仍=IDX(回放截止)
+  HM.off=off;
   // 格子(每行18px; 行业缺该日→深灰列)
   for(var ci=0;ci<cols.length;ci++){
     var di=cols[ci][1];
     if(di<0){ ctx.fillStyle='#161b22';
-      ctx.fillRect(padL+ci*cw, 0, Math.max(cw,0.5), H); continue; }
+      ctx.fillRect(padL+(ci+off)*cw, 0, Math.max(cw,0.5), H); continue; }
     var row = HEATMODE===2? SRC.mat[di] : SRC.mat[di][HEATMODE];
     for(var ri=0;ri<N;ri++){
       var k=order[ri], v=row[k];
       ctx.fillStyle = v==null? '#21262d' : heatColor(v,HEATMODE);
-      ctx.fillRect(padL+ci*cw, ri*RH, Math.max(cw,0.5), RH);
+      ctx.fillRect(padL+(ci+off)*cw, ri*RH, Math.max(cw,0.5), RH);
     }
   }
   // 当前行业行高亮(蓝框+背景)
@@ -553,7 +555,8 @@ function drawIndustry(s, e, W){
   var padT=16, padB=6;
   var Y=function(v){ return padT+(IH-padT-padB)*(1-(v-lo)/(hi-lo)); };
   var bw=(W-PADL-PADR)/VIEW;
-  var X=function(k){ return PADL+bw*(k+.5); };
+  var off=VIEW-bars.length;   // 与主图同: 右缘=IDX
+  var X=function(k){ return PADL+bw*(k+off+.5); };
   var bwid=Math.max(1, Math.floor(bw*0.7));
   // 网格+右轴
   ctx.font='10px '+FF; ctx.textBaseline='middle'; ctx.textAlign='left';
@@ -810,10 +813,8 @@ function bind(){
     nv=Math.max(40, Math.min(600, nv));
     if(nv===oldV) return;
     VIEW=nv;
-    // 保持锚列在视口同一相对位置
-    var rel = oldV>1? anchorK/(oldV-1) : 0;         // 锚列在旧窗口的相对位置0..1
-    var newTail = gIdx + Math.round((1-rel)*(VIEW-1));   // 新窗尾使锚仍在rel处
-    IDX=Math.max(VIEW-1, Math.min(DATA.length-1, newTail));
+    // 回放纪律: IDX(回放截止)不动 — 缩放只向左扩展/收缩历史, 永不暴露未回放K线
+    if(IDX<VIEW-1) IDX=VIEW-1;   // 仅当历史不足时窗左移到头(IDX仍=数据允许的最小, 不前进)
     drawAll();
   }, {passive:false});
 }

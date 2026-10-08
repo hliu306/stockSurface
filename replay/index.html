@@ -20,12 +20,14 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-
 #subSwitch{display:flex;gap:6px;margin-bottom:4px;flex-shrink:0;}
 canvas{background:var(--panel);border:1px solid var(--bd);border-radius:8px;}
 #panes{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;}
-#kbar{flex:1;min-height:220px;}
-#ibar{height:200px;margin-top:6px;flex-shrink:0;}
-#heatWrap{margin-top:6px;flex-shrink:0;display:flex;flex-direction:column;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);}
+#kbar{flex:0 0 60%;min-height:200px;}
+#vSplit{height:7px;flex-shrink:0;cursor:row-resize;background:linear-gradient(to bottom,transparent 2px,#30363d 2px,#30363d 5px,transparent 5px);position:relative;}
+#vSplit:hover,#vSplit.on{background:linear-gradient(to bottom,transparent 1px,#58a6ff 1px,#58a6ff 6px,transparent 6px);}
+#ibar{flex:0 0 calc(20% - 7px);min-height:90px;}
+#heatWrap{flex:1 1 auto;min-height:44px;margin-top:0;display:flex;flex-direction:column;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);}
 #heatHead{height:22px;flex-shrink:0;display:flex;align-items:center;padding-left:8px;background:#10151d;border-bottom:1px solid var(--bd);}
 #minebar{height:22px;display:block;flex-shrink:0;border-bottom:1px solid var(--bd);}
-#heatScroll{max-height:520px;overflow-y:auto;overflow-x:hidden;}
+#heatScroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}
 #heatbar{display:block;}
 #xhair{position:absolute;top:0;left:0;background:none;border:none;pointer-events:none;z-index:5;}
 #panes canvas{display:block;}
@@ -77,6 +79,7 @@ kbd{background:#21262d;border-radius:3px;padding:0 4px;font-size:11px;}
     <div id="panes">
       <canvas id="kbar"></canvas>
       <canvas id="ibar"></canvas>
+      <div id="vSplit" title="拖拽调整行业图/热力图高度"></div>
       <div id="heatWrap">
         <div id="heatHead"></div>
         <canvas id="minebar"></canvas>
@@ -774,6 +777,45 @@ function bind(){
   iv.onmousemove=function(e){ hoverMove(e,'i'); };
   cv.onmouseleave=iv.onmouseleave=function(){ tip.style.display='none'; XH.k=-1; XH.my=-1; syncXhair(); };
   window.addEventListener('resize', drawAll);
+  // ---- 热力图高度拖拽(vSplit) ----
+  var vs=$('vSplit'), panesEl=$('panes');
+  var drag=null;
+  vs.addEventListener('mousedown', function(ev){
+    drag={y0:ev.clientY, ib0:$('ibar').getBoundingClientRect().height};
+    vs.classList.add('on');
+    ev.preventDefault();
+  });
+  document.addEventListener('mousemove', function(ev){
+    if(!drag) return;
+    var dy=ev.clientY-drag.y0;
+    var panesH=panesEl.getBoundingClientRect().height;
+    var ibH=Math.max(60, Math.min(panesH*0.7, drag.ib0+dy));
+    var frac=ibH/panesH;
+    $('ibar').style.flex='0 0 '+ibH+'px';
+    // kbar保持60%: 由flex-basis百分比—kbar在上,vSplit+ibar+heatWrap在下; 实际上kbar flex 60%固定, 只重分下两块
+    drawAll();
+  });
+  document.addEventListener('mouseup', function(){ if(drag){ drag=null; vs.classList.remove('on'); } });
+  // ---- 主图滚轮缩放: VIEW 40~500, 以鼠标位置为锚 ----
+  var kb=$('kbar');
+  kb.addEventListener('wheel', function(ev){
+    ev.preventDefault();
+    var rect=kb.getBoundingClientRect();
+    var mx=ev.clientX-rect.left;
+    var anchorK=colFromX(mx);                       // 鼠标下的列(相对窗)
+    var s0=Math.max(0,IDX-VIEW+1);
+    var gIdx=s0+Math.max(0,anchorK);                // 全局索引锚
+    var oldV=VIEW;
+    var nv = ev.deltaY<0? Math.round(VIEW*0.85) : Math.round(VIEW*1.18);
+    nv=Math.max(40, Math.min(600, nv));
+    if(nv===oldV) return;
+    VIEW=nv;
+    // 保持锚列在视口同一相对位置
+    var rel = oldV>1? anchorK/(oldV-1) : 0;         // 锚列在旧窗口的相对位置0..1
+    var newTail = gIdx + Math.round((1-rel)*(VIEW-1));   // 新窗尾使锚仍在rel处
+    IDX=Math.max(VIEW-1, Math.min(DATA.length-1, newTail));
+    drawAll();
+  }, {passive:false});
 }
 function togglePlay(){
   if(PLAY){ clearInterval(PLAY); PLAY=null; $('btnPlay').textContent='▶ 播放'; return; }

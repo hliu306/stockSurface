@@ -158,6 +158,7 @@ function loadStock(cb){
     DATA=j.rows.filter(function(r){ return r[1]!=null&&r[4]!=null&&isFinite(r[1])&&isFinite(r[4]); })
       .map(function(r){ return {d:String(r[0]),o:r[1],h:r[2],l:r[3],c:r[4],v:r[5]||0,a:r[6]||0}; });
     IDX=Math.max(VIEW, Math.min(DATA.length-1, IDX));
+    VIEW=Math.min(VIEW, IDX+1);   // 回放纪律: 换股后若IDX更靠前, VIEW随缩
     cb();
   });
 }
@@ -720,6 +721,7 @@ function loadSave(){
 /* ---------- 交互 ---------- */
 function step(n){
   IDX=Math.max(VIEW-1, Math.min(DATA.length-1, IDX+n));
+  VIEW=Math.min(VIEW, IDX+1);   // 回放纪律: 向左步进后历史变短, VIEW随缩
   drawAll();
 }
 function bind(){
@@ -751,7 +753,7 @@ function bind(){
     if(e.key==='ArrowLeft'||e.key==='PageUp'){ step(-1); e.preventDefault(); }
     else if(e.key==='ArrowRight'||e.key==='PageDown'){ step(1); e.preventDefault(); }
     else if(e.key===' '){ togglePlay(); e.preventDefault(); }
-    else if(e.key==='Home'){ IDX=VIEW-1; drawAll(); }
+    else if(e.key==='Home'){ IDX=VIEW-1; VIEW=Math.min(VIEW, IDX+1); drawAll(); }
     else if(e.key==='b'||e.key==='B'){ trade('BUY'); }
     else if(e.key==='s'||e.key==='S'){ trade('SELL'); }
   });

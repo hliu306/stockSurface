@@ -139,7 +139,8 @@ function loadIndList(cb){
 function loadStock(cb){
   var url = STK ? ('/replay/stock/'+STK+'.json.gz') : ('/replay/ind/'+IND+'.json');
   fetch(url).then(r=>r.json()).then(j=>{
-    DATA=j.rows.map(function(r){ return {d:String(r[0]),o:r[1],h:r[2],l:r[3],c:r[4],v:r[5],a:r[6]}; });
+    DATA=j.rows.filter(function(r){ return r[1]!=null&&r[4]!=null&&isFinite(r[1])&&isFinite(r[4]); })
+      .map(function(r){ return {d:String(r[0]),o:r[1],h:r[2],l:r[3],c:r[4],v:r[5]||0,a:r[6]||0}; });
     IDX=Math.max(VIEW, Math.min(DATA.length-1, IDX));
     cb();
   });

@@ -16,8 +16,11 @@ RP = f'{BASE}/replay'
 os.makedirs(f'{RP}/stock', exist_ok=True)
 os.makedirs(f'{RP}/saves', exist_ok=True)
 
-TD = pd.read_parquet(f'{BASE}/cache_td_v2.parquet',
-                     columns=['ts_code','trade_date','open','high','low','close','vol','amount'])
+# close/vol/amount源(cache_td_v2) + OHLC源(ohlc_full, 2015-2026零缺口)
+_tdc = pd.read_parquet(f'{BASE}/cache_td_v2.parquet',
+                       columns=['ts_code','trade_date','close','vol','amount'])
+_ohl = pd.read_parquet(f'{RP}/ohlc_full.parquet')          # ts_code,trade_date,open,high,low
+TD = _tdc.merge(_ohl, on=['ts_code','trade_date'], how='left')
 TD['trade_date'] = TD['trade_date'].astype(str)
 CODES = set(TD.ts_code.unique())
 
@@ -60,11 +63,20 @@ class H(BaseHTTPRequestHandler):
                 fp = f'{RP}/stock/{ts}.json.gz'
                 if not os.path.exists(fp):
                     g = TD[TD.ts_code==ts].sort_values('trade_date')
-                    rows = [[r.trade_date, r.open, r.high, r.low, r.close, r.vol, r.amount]
-                            for r in g.itertuples()]
+                    rows = []
+                    for r in g.itertuples():
+                        if not (r.close==r.close): continue     # close NaN→跳过
+                        o_,h_,l_ = r.open, r.high, r.low
+                        if not (o_==o_): o_ = h_ = l_ = r.close  # OHLC缺→平盘蜡烛
+                        if not (h_==h_): h_ = max(o_, r.close)
+                        if not (l_==l_): l_ = min(o_, r.close)
+                        rows.append([r.trade_date, round(float(o_),3), round(float(h_),3),
+                                     round(float(l_),3), round(float(r.close),3),
+                                     float(r.vol) if r.vol==r.vol else 0,
+                                     float(r.amount) if r.amount==r.amount else 0])
                     buf = io.BytesIO()
                     with gzip.open(buf,'wt',encoding='utf-8') as f:
-                        json.dump({'code':ts,'rows':rows}, f, separators=(',',':'))
+                        json.dump({'code':ts,'rows':rows}, f, separators=(',',':'), allow_nan=False)
                     tmp = fp+'.tmp'
                     open(tmp,'wb').write(buf.getvalue())
                     os.replace(tmp, fp)

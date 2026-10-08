@@ -21,6 +21,7 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-
 canvas{background:var(--panel);border:1px solid var(--bd);border-radius:8px;}
 #kbar{flex:1;min-height:0;}
 #vbar{height:110px;margin-top:6px;}
+#heatbar{height:230px;margin-top:6px;}
 #right{width:270px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--bd);display:flex;flex-direction:column;overflow-y:auto;padding:8px;}
 #right h4{font-size:12px;color:var(--tx2);margin:6px 0 4px;font-weight:normal;}
 table{border-collapse:collapse;width:100%;font-size:12px;}
@@ -58,10 +59,15 @@ kbd{background:#21262d;border-radius:3px;padding:0 4px;font-size:11px;}
   <div id="chartWrap">
     <div id="subSwitch">
       <button class="btn" id="swK">主图: 行业</button>
+      <select class="sel" id="heatModeSel" style="max-width:130px">
+        <option value="0">截面: 日涨跌幅</option>
+        <option value="1">截面: 20日动量</option>
+      </select>
       <span style="color:var(--tx2);font-size:12px" id="subTitle"></span>
     </div>
     <canvas id="kbar"></canvas>
-    <canvas id="vbar"></canvas>
+    <canvas id="vbar" height="110"></canvas>
+    <canvas id="heatbar" height="230"></canvas>
   </div>
   <div id="right">
     <div id="orderPane">
@@ -131,10 +137,83 @@ function loadChart(cb){
   });
 }
 
+/* ---------- 截面热力图副图 ---------- */
+var CROSS=null, HEATMODE=0;   // 0=日涨跌幅, 1=20日动量
+function loadCross(cb){
+  if(CROSS) return cb();
+  fetch('/replay/cross.json').then(r=>r.json()).then(j=>{
+    CROSS=j;   // {codes, dates, mat:[ [ [chg1×90], [chg20×90] ] ×dates ]}
+    var sel=$('heatModeSel');
+    if(sel) sel.onchange=function(){ HEATMODE=+this.value; drawHeat(); };
+    cb();
+  });
+}
+function heatColor(v, mode){
+  // A股红涨绿跌: v>0红. 日模式cap±5%, 20日模式cap±20%
+  var cap = mode? 20:5;
+  var t = Math.max(-1, Math.min(1, v/cap));
+  if(t>=0){ // 白底→红
+    var r=232+Math.round(23*t), g=237-Math.round(160*t), b=243-Math.round(190*t);
+    return 'rgb('+r+','+g+','+b+')';
+  } else {  // 白底→绿
+    var t2=-t, r=232-Math.round(160*t2), g=237+Math.round(18*t2), b=243-Math.round(151*t2);
+    return 'rgb('+r+','+g+','+b+')';
+  }
+}
+function drawHeat(){
+  var cv=$('heatbar'); if(!cv||!CROSS) return;
+  var W=cv.parentElement.clientWidth, H=230;
+  cv.width=W; cv.height=H;
+  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,H);
+  var d = DATA && DATA[IDX] ? DATA[IDX].d : null;
+  if(!d) return;
+  var di = CROSS.dates.indexOf(d);
+  if(di<0){ ctx.fillStyle='#8b949e'; ctx.fillText('该日无行业截面', 20, 30); return; }
+  var codes=CROSS.codes, N=codes.length;
+  var row = CROSS.mat[di][HEATMODE];
+  // 排序: 按当前值降序(强→弱)
+  var idxs=[]; for(var i=0;i<N;i++) idxs.push(i);
+  idxs.sort(function(a,b){ var va=row[a], vb=row[b];
+    if(va==null) return 1; if(vb==null) return -1; return vb-va; });
+  // 布局: 9列×10行 格子
+  var padL=96, padR=8, padT=20, padB=8;
+  var cols=9, rows=Math.ceil(N/cols);
+  var cw=(W-padL-padR)/cols, chh=(H-padT-padB)/rows;
+  ctx.fillStyle='#8b949e'; ctx.font='11px sans-serif';
+  ctx.fillText('行业截面回放 · '+(HEATMODE?'20日动量%':'日涨跌幅%')+' · '+fmtD(d)+(di<CROSS.dates.length-1?'':' (最新)'), padL+4, 14);
+  idxs.forEach(function(src,rank){
+    var c=codes[src], v=row[src];
+    var col=rank%cols, rw=Math.floor(rank/cols);
+    var x=padL+col*cw, y=padT+rw*chh;
+    var nm=INDNAME[c]||c;
+    // 当前个股所属行业高亮描边
+    var isMine = STK ? (UNI[STK] && UNI[STK].ind===nm) : (c===IND);
+    ctx.fillStyle = v==null ? '#21262d' : heatColor(v, HEATMODE);
+    ctx.fillRect(x+1, y+1, cw-2, chh-2);
+    if(isMine){ ctx.strokeStyle='#58a6ff'; ctx.lineWidth=2; ctx.strokeRect(x+1.5,y+1.5,cw-3,chh-3); ctx.lineWidth=1; }
+    // 格内: 名+值
+    ctx.fillStyle = v==null? '#8b949e' : (Math.abs(v)>(HEATMODE?10:3)?'#fff':'#1b1f24');
+    ctx.font='10px sans-serif';
+    ctx.fillText(nm.slice(0,5), x+5, y+chh/2-1);
+    ctx.fillText(v==null?'—':(v>0?'+':'')+v.toFixed(1), x+5, y+chh/2+11);
+    // 左缘排组标签
+    if(col===0){ ctx.fillStyle='#8b949e'; ctx.fillText((rank+1)+'-'+(rank+rows>N?N:rank+rows), 8, y+chh/2+3); }
+  });
+  // 图例: -cap..+cap
+  var lx=padL, ly=H-2;
+  for(var g=0;g<40;g++){
+    var vv=(g/39*2-1)*(HEATMODE?20:5);
+    ctx.fillStyle=heatColor(vv,HEATMODE); ctx.fillRect(lx+g*3, H-8, 3, 6);
+  }
+  ctx.fillStyle='#8b949e'; ctx.font='9px sans-serif';
+  ctx.fillText('-'+(HEATMODE?20:5)+'%', lx-4, H-10);
+  ctx.fillText('+'+(HEATMODE?20:5)+'%', lx+124, H-10);
+}
+
 /* ---------- 渲染 ---------- */
 var MA=[];
 function drawAll(){
-  var cv=$('kbar'), W=cv.parentElement.clientWidth-0, H=cv.parentElement.clientHeight-$('vbar').clientHeight-18;
+  var cv=$('kbar'), W=cv.parentElement.clientWidth-0, H=cv.parentElement.clientHeight-$('vbar').clientHeight-$('heatbar').clientHeight-30;
   cv.width=W; cv.height=Math.max(240,H);
   var ctx=cv.getContext('2d');
   ctx.clearRect(0,0,W,H);
@@ -201,6 +280,7 @@ function drawAll(){
   });
   $('dateShow').textContent=last.d;
   drawVol(cv, s, e, W, vmax);
+  drawHeat();
   $('subTitle').textContent = STK ? ('个股: '+UNI[STK].name+' · 行业: '+UNI[STK].ind) : ('行业: '+(INDNAME[IND]||IND));
   updateAccount(last);
   $('pxNow').textContent = last.c.toFixed(2) + ' ('+(STK?UNI[STK].name:(INDNAME[IND]||IND))+')';
@@ -351,8 +431,10 @@ function renderMembers(){
 
 /* ---------- 启动 ---------- */
 loadUniverse(function(){
-  loadChart(function(){
-    bind(); drawAll(); renderMembers(); loadSave();
+  loadCross(function(){
+    loadChart(function(){
+      bind(); drawAll(); renderMembers(); loadSave();
+    });
   });
 });
 </script>

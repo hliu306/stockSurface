@@ -17,9 +17,11 @@ os.makedirs(f'{RP}/stock', exist_ok=True)
 os.makedirs(f'{RP}/saves', exist_ok=True)
 
 # close/vol/amount源(cache_td_v2) + OHLC源(ohlc_full, 2015-2026零缺口)
+# 只取OHLC三列: parquet可能含close/vol/amount(日更产物), 全merge会成close_x/close_y崩itertuples
 _tdc = pd.read_parquet(f'{BASE}/cache_td_v2.parquet',
                        columns=['ts_code','trade_date','close','vol','amount'])
-_ohl = pd.read_parquet(f'{RP}/ohlc_full.parquet')          # ts_code,trade_date,open,high,low
+_ohl = pd.read_parquet(f'{RP}/ohlc_full.parquet',
+                       columns=['ts_code','trade_date','open','high','low'])
 TD = _tdc.merge(_ohl, on=['ts_code','trade_date'], how='left')
 TD['trade_date'] = TD['trade_date'].astype(str)
 CODES = set(TD.ts_code.unique())

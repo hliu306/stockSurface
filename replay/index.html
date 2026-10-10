@@ -157,8 +157,8 @@ function loadStock(cb){
   fetch(url).then(r=>r.json()).then(j=>{
     DATA=j.rows.filter(function(r){ return r[1]!=null&&r[4]!=null&&isFinite(r[1])&&isFinite(r[4]); })
       .map(function(r){ return {d:String(r[0]),o:r[1],h:r[2],l:r[3],c:r[4],v:r[5]||0,a:r[6]||0}; });
-    IDX=Math.max(VIEW, Math.min(DATA.length-1, IDX));
-    VIEW=Math.min(VIEW, IDX+1);   // 回放纪律: 换股后若IDX更靠前, VIEW随缩
+    IDX=Math.min(VIEW-1, DATA.length-1);   // 每次切换=从最早数据开始铺满一个幅面
+    if(IDX<0) IDX=DATA.length-1>=0?DATA.length-1:0;
     cb();
   });
 }

@@ -121,6 +121,7 @@ var UNI=null, INDNAME={}, MEMBERS={};   // universe缓存
 var IND='881169', STK=null, DATA=null, IDATA=null, IDX=250*2, PLAY=null;
 var CASH=1000000, HOLDS={}, TRADES=[], SCENE='default';
 var VIEW=110;   // 可视蜡烛数
+var WOFF=0;     // 窗口右缘回退量(拖拽平移): 窗口=[IDX-WOFF-VIEW+1, IDX-WOFF], 右缘≤回放前沿IDX
 
 function $(id){ return document.getElementById(id); }
 function fmtD(d){ return d; }
@@ -159,6 +160,7 @@ function loadStock(cb){
       .map(function(r){ return {d:String(r[0]),o:r[1],h:r[2],l:r[3],c:r[4],v:r[5]||0,a:r[6]||0}; });
     IDX=Math.min(VIEW-1, DATA.length-1);   // 每次切换=从最早数据开始铺满一个幅面
     if(IDX<0) IDX=DATA.length-1>=0?DATA.length-1:0;
+    WOFF=0;   // 切换=回到回放前沿
     cb();
   });
 }
@@ -206,7 +208,7 @@ function drawHeat(){
   var W=cv.parentElement.clientWidth, N=SRC.codes.length;
   var H=RH*N;
   var ctx=setupCanvas(cv, W, H);
-  var s=Math.max(0, IDX-VIEW+1), e=IDX;
+  var s=Math.max(0, IDX-WOFF-VIEW+1), e=IDX-WOFF;
   var bars=DATA.slice(s,e+1);
   // 列 = 个股窗内每一根蜡烛, 值按日期字符串对位
   var dmap={};
@@ -303,7 +305,7 @@ function drawMineBar(){
   var W=cv.parentElement.clientWidth, H=22;
   var ctx=setupCanvas(cv, W, H);
   ctx.clearRect(0,0,W,H);
-  var s=Math.max(0, IDX-VIEW+1), e=IDX;
+  var s=Math.max(0, IDX-WOFF-VIEW+1), e=IDX-WOFF;
   // 当前行业code
   var mineCode=null;
   if(STK && UNI[STK]){ var nm=UNI[STK].ind;
@@ -413,7 +415,7 @@ function drawAll(){
   var W=cv.parentElement.clientWidth, H=Math.max(260, cv.clientHeight);
   var ctx=setupCanvas(cv, W, H);
   var padL=PADL, padR=PADR, padT=34, padB=20;
-  var s=Math.max(0, IDX-VIEW+1), e=IDX;
+  var s=Math.max(0, IDX-WOFF-VIEW+1), e=IDX-WOFF;
   var bars=DATA.slice(s,e+1);
   if(!bars.length) return;
   function ma(n,i){ var st=Math.max(0,i-n+1), sum=0; for(var j=st;j<=i;j++) sum+=DATA[j].c; return sum/(i-st+1); }
@@ -639,7 +641,7 @@ function syncXhair(){
     ctx.fillRect(W-PADR+2, cy-8, PADR-6, 16);
     ctx.fillStyle='#e6edf3'; ctx.textAlign='center'; ctx.font='bold 10px '+FF;
     ctx.fillText(pv.toFixed(2), W-PADR/2-1, cy);
-    var s=Math.max(0,IDX-VIEW+1);
+    var s=Math.max(0,IDX-WOFF-VIEW+1);
     if(DATA[s+XH.k]){
       var dd=DATA[s+XH.k].d, tw=52;
       ctx.fillStyle='#36404f';
@@ -753,7 +755,7 @@ function bind(){
     if(e.key==='ArrowLeft'||e.key==='PageUp'){ step(-1); e.preventDefault(); }
     else if(e.key==='ArrowRight'||e.key==='PageDown'){ step(1); e.preventDefault(); }
     else if(e.key===' '){ togglePlay(); e.preventDefault(); }
-    else if(e.key==='Home'){ IDX=VIEW-1; VIEW=Math.min(VIEW, IDX+1); drawAll(); }
+    else if(e.key==='Home'){ IDX=VIEW-1; WOFF=0; VIEW=Math.min(VIEW, IDX+1); drawAll(); }
     else if(e.key==='b'||e.key==='B'){ trade('BUY'); }
     else if(e.key==='s'||e.key==='S'){ trade('SELL'); }
   });
@@ -766,8 +768,8 @@ function bind(){
     var kt=$('kbar').getBoundingClientRect().top;
     XH.k=k; XH.my = which==='k'? (e.clientY-kt) : -1;
     syncXhair();
-    var s=Math.max(0,IDX-VIEW+1);
-    if(k<0||k>=DATA.slice(s,IDX+1).length){ tip.style.display='none'; return; }
+    var s=Math.max(0,IDX-WOFF-VIEW+1);
+    if(k<0||k>=DATA.slice(s,IDX-WOFF+1).length){ tip.style.display='none'; return; }
     var b=DATA[s+k];
     var html='<b>'+b.d+'</b> 个股 '+(STK&&UNI[STK]?UNI[STK].name:'-')+'<br>O '+b.o.toFixed(2)+'  H '+b.h.toFixed(2)+'  L '+b.l.toFixed(2)+'  C '+b.c.toFixed(2)+'<br>V '+(b.v/1e4>=1?(b.v/1e4).toFixed(1)+'万手':b.v.toFixed(0)+'手')+'  额 '+(b.a/1e8>=1?(b.a/1e8).toFixed(2)+'亿':(b.a/1e4).toFixed(0)+'万');
     if(IDATA){ var found=null;
@@ -801,21 +803,41 @@ function bind(){
     drawAll();
   });
   document.addEventListener('mouseup', function(){ if(drag){ drag=null; vs.classList.remove('on'); } });
-  // ---- 主图滚轮缩放: VIEW 40~500, 以鼠标位置为锚 ----
+  // ---- 主图拖拽平移: 窗口在已回放区间内挪动, 右缘永不越过回放前沿IDX ----
   var kb=$('kbar');
+  var pan=null;
+  kb.addEventListener('mousedown', function(ev){
+    pan={x0:ev.clientX, w0:WOFF};
+    kb.style.cursor='grabbing';
+    ev.preventDefault();
+  });
+  document.addEventListener('mousemove', function(ev){
+    if(!pan) return;
+    var rect=kb.getBoundingClientRect();
+    var bw=(rect.width-PADL-PADR)/VIEW;
+    if(bw<=0) return;
+    var dcol=Math.round((ev.clientX-pan.x0)/bw);   // 拖过dcol列
+    var maxOff=Math.max(0, IDX+1-VIEW);            // WOFF上限: 窗左=IDX-WOFF-VIEW+1≥0
+    var nw=Math.max(0, Math.min(maxOff, pan.w0-dcol));   // 鼠标左拖(dcol<0)=看更早=WOFF增大
+    if(nw!==WOFF){ WOFF=nw; drawAll(); }
+  });
+  document.addEventListener('mouseup', function(){ if(pan){ pan=null; kb.style.cursor='crosshair'; } });
+  // ---- 主图滚轮缩放 ----
   kb.addEventListener('wheel', function(ev){
     ev.preventDefault();
     var rect=kb.getBoundingClientRect();
     var mx=ev.clientX-rect.left;
     var anchorK=colFromX(mx);                       // 鼠标下的列(相对窗)
-    var s0=Math.max(0,IDX-VIEW+1);
+    var s0=Math.max(0,IDX-WOFF-VIEW+1);
     var gIdx=s0+Math.max(0,anchorK);                // 全局索引锚
     var oldV=VIEW;
     var nv = ev.deltaY<0? Math.round(VIEW*0.72) : Math.round(VIEW*1.42);
     nv=Math.max(25, Math.min(3000, nv));
-    nv=Math.min(nv, IDX+1);   // ★回放纪律: 窗口最多容纳已回放的IDX+1根 — 头部时缩放被钳制, IDX永不前进
+    var avail=IDX+1;          // 已回放总根数
+    nv=Math.min(nv, avail);   // ★回放纪律: 窗口最多容纳已回放的IDX+1根
     if(nv===oldV) return;
     VIEW=nv;
+    WOFF=Math.min(WOFF, Math.max(0, avail-VIEW));   // 平移回退量随缩放重钳: 窗左≥0
     drawAll();
   }, {passive:false});
 }

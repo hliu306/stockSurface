@@ -811,8 +811,8 @@ function bind(){
     var s0=Math.max(0,IDX-VIEW+1);
     var gIdx=s0+Math.max(0,anchorK);                // 全局索引锚
     var oldV=VIEW;
-    var nv = ev.deltaY<0? Math.round(VIEW*0.85) : Math.round(VIEW*1.18);
-    nv=Math.max(40, Math.min(600, nv));
+    var nv = ev.deltaY<0? Math.round(VIEW*0.72) : Math.round(VIEW*1.42);
+    nv=Math.max(25, Math.min(1200, nv));
     nv=Math.min(nv, IDX+1);   // ★回放纪律: 窗口最多容纳已回放的IDX+1根 — 头部时缩放被钳制, IDX永不前进
     if(nv===oldV) return;
     VIEW=nv;

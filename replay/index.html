@@ -789,11 +789,17 @@ function bind(){
     var vh=window.innerHeight;
     var top=panesEl.getBoundingClientRect().top + (window.scrollY||0);
     var avail=Math.max(520, vh-top-8);
-    panesEl.style.height=avail+'px';
-    var kH=Math.round(avail*0.60), iH=Math.round(avail*0.20)-7;
-    $('kbar').style.flex='0 0 '+kH+'px';
-    $('ibar').style.flex='0 0 '+Math.max(60,iH)+'px';
+    var kH=Math.round(avail*0.60), iH=Math.max(60, Math.round(avail*0.20)-7);
+    var kCur=$('kbar').style.flex, kNew='0 0 '+kH+'px';
+    if(kCur!==kNew) $('kbar').style.flex=kNew;               // 未变不写, 避免每步重排
+    var ibH=$('ibar').getBoundingClientRect().height||iH;    // vSplit拖拽后的实际高优先
+    // panes高=视口 与 内容需要(kbar+vSplit+ibar+热区全量) 取大 → 内容超出即整页出滚动条
+    var heatContent=($('heatScroll').offsetHeight||0);
+    var need=kH+7+Math.round(ibH)+22+22+heatContent+4;
+    var h=Math.max(avail, need);
+    if(panesEl.style.height!==h+'px') panesEl.style.height=h+'px';
   }
+  var _drawAll0=drawAll; drawAll=function(){ _drawAll0(); layoutPanes(); };   // 每次重绘后保证布局含全量热区
   layoutPanes();
   window.addEventListener('resize', function(){ layoutPanes(); drawAll(); });
   // ---- vSplit拖拽: ibar像素高增减, heatWrap自动吃剩余; 拖到底=热力图全量展开(panes随内容加高→整页滚) ----

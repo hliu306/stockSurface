@@ -6,7 +6,7 @@
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--bd:#30363d;--tx:#e6edf3;--tx2:#8b949e;--acc:#58a6ff;--up:#f85149;--dn:#3fb950;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow:hidden;}
 #top{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--bd);flex-shrink:0;}
 #top b{font-size:15px;}
 .sel{background:#0d1117;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:13px;max-width:220px;}
@@ -19,7 +19,7 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-
 #chartWrap{flex:1;display:flex;flex-direction:column;min-width:0;padding:6px;}
 #subSwitch{display:flex;gap:6px;margin-bottom:4px;flex-shrink:0;}
 canvas{background:var(--panel);border:1px solid var(--bd);border-radius:8px;}
-#panes{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;}
+#panes{position:relative;flex:none;min-height:520px;display:flex;flex-direction:column;}
 #kbar{flex:0 0 60%;min-height:200px;}
 #vSplit{height:7px;flex-shrink:0;cursor:row-resize;background:linear-gradient(to bottom,transparent 2px,#30363d 2px,#30363d 5px,transparent 5px);position:relative;}
 #vSplit:hover,#vSplit.on{background:linear-gradient(to bottom,transparent 1px,#58a6ff 1px,#58a6ff 6px,transparent 6px);}
@@ -27,7 +27,7 @@ canvas{background:var(--panel);border:1px solid var(--bd);border-radius:8px;}
 #heatWrap{flex:1 1 auto;min-height:44px;margin-top:0;display:flex;flex-direction:column;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel);}
 #heatHead{height:22px;flex-shrink:0;display:flex;align-items:center;padding-left:8px;background:#10151d;border-bottom:1px solid var(--bd);}
 #minebar{height:22px;display:block;flex-shrink:0;border-bottom:1px solid var(--bd);}
-#heatScroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}
+#heatScroll{flex-shrink:0;}   /* 全高直出, 不内滚 — 页面滚动/拖vSplit看全量 */
 #heatbar{display:block;}
 #xhair{position:absolute;top:0;left:0;background:none;border:none;pointer-events:none;z-index:5;}
 #panes canvas{display:block;}
@@ -205,7 +205,7 @@ function drawHeat(){
   var cv=$('heatbar'); if(!cv||!CROSS) return;
   var SRC = (HEATMODE===2)? TIER : CROSS;
   if(!DATA || !DATA.length || !SRC) return;
-  var W=cv.parentElement.clientWidth, N=SRC.codes.length;
+  var W=document.getElementById('panes').clientWidth, N=SRC.codes.length;   /* 与主图同宽: 消除heatWrap边框造成的2px错位 */
   var H=RH*N;
   var ctx=setupCanvas(cv, W, H);
   var s=Math.max(0, IDX-WOFF-VIEW+1), e=IDX-WOFF;
@@ -302,7 +302,7 @@ function drawMineBar(){
   var cv=$('minebar'); if(!cv||!CROSS) return;
   var SRC = (HEATMODE===2)? TIER : CROSS;
   if(!DATA || !DATA.length || !SRC) return;
-  var W=cv.parentElement.clientWidth, H=22;
+  var W=document.getElementById('panes').clientWidth, H=22;   /* 同上: 三图X几何同源 */
   var ctx=setupCanvas(cv, W, H);
   ctx.clearRect(0,0,W,H);
   var s=Math.max(0, IDX-WOFF-VIEW+1), e=IDX-WOFF;
@@ -783,12 +783,23 @@ function bind(){
   cv.onmousemove=function(e){ hoverMove(e,'k'); };
   iv.onmousemove=function(e){ hoverMove(e,'i'); };
   cv.onmouseleave=iv.onmouseleave=function(){ tip.style.display='none'; XH.k=-1; XH.my=-1; syncXhair(); };
-  window.addEventListener('resize', drawAll);
-  // ---- 热力图高度拖拽(vSplit) ----
+  // ---- 布局: 像素制(kbar 60%/ibar 20%/heat吃剩余), panes可超视口→整页滚动 ----
   var vs=$('vSplit'), panesEl=$('panes');
+  function layoutPanes(){
+    var vh=window.innerHeight;
+    var top=panesEl.getBoundingClientRect().top + (window.scrollY||0);
+    var avail=Math.max(520, vh-top-8);
+    panesEl.style.height=avail+'px';
+    var kH=Math.round(avail*0.60), iH=Math.round(avail*0.20)-7;
+    $('kbar').style.flex='0 0 '+kH+'px';
+    $('ibar').style.flex='0 0 '+Math.max(60,iH)+'px';
+  }
+  layoutPanes();
+  window.addEventListener('resize', function(){ layoutPanes(); drawAll(); });
+  // ---- vSplit拖拽: ibar像素高增减, heatWrap自动吃剩余; 拖到底=热力图全量展开(panes随内容加高→整页滚) ----
   var drag=null;
   vs.addEventListener('mousedown', function(ev){
-    drag={y0:ev.clientY, ib0:$('ibar').getBoundingClientRect().height};
+    drag={y0:ev.clientY, ib0:$('ibar').getBoundingClientRect().height, ph0:panesEl.getBoundingClientRect().height};
     vs.classList.add('on');
     ev.preventDefault();
   });
@@ -797,9 +808,7 @@ function bind(){
     var dy=ev.clientY-drag.y0;
     var panesH=panesEl.getBoundingClientRect().height;
     var ibH=Math.max(60, Math.min(panesH*0.7, drag.ib0+dy));
-    var frac=ibH/panesH;
     $('ibar').style.flex='0 0 '+ibH+'px';
-    // kbar保持60%: 由flex-basis百分比—kbar在上,vSplit+ibar+heatWrap在下; 实际上kbar flex 60%固定, 只重分下两块
     drawAll();
   });
   document.addEventListener('mouseup', function(){ if(drag){ drag=null; vs.classList.remove('on'); } });

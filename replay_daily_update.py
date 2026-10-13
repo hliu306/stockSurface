@@ -14,6 +14,7 @@ RP   = '/mnt/e/stockSurface/replay'
 OHLC = f'{RP}/ohlc_full.parquet'
 CROSS= f'{RP}/cross.json'
 TIER = f'{RP}/tier.json'
+ADJ  = f'{RP}/adj_events.parquet'
 THS  = '/mnt/e/stockSurface/ths_kline'
 HEAT = '/mnt/e/stockSurface/stock_heat_tier.json'
 LOG_TAG = 'replay_daily'
@@ -31,14 +32,14 @@ def update_ohlc():
         try:
             r = requests.post('http://api.tushare.pro', json={
                 "api_name":"daily","token":tk,"params":{"trade_date":str(d)},
-                "fields":"ts_code,trade_date,open,high,low,close,vol,amount"}, timeout=60)
+                "fields":"ts_code,trade_date,open,high,low,close,vol,amount,pre_close"}, timeout=60)
             j = r.json(); items = (j.get('data') or {}).get('items')
         except Exception as e:
             log(f'  {d} 拉取异常: {e}'); continue
         if not items: continue          # 休市/未发布 → 跳
-        df = pd.DataFrame(items, columns=['ts_code','trade_date','open','high','low','close','vol','amount'])
+        df = pd.DataFrame(items, columns=['ts_code','trade_date','open','high','low','close','vol','amount','pre_close'])
         df['trade_date']=df['trade_date'].astype('int32')
-        for c in ['open','high','low','close','vol','amount']: df[c]=df[c].astype('float64')
+        for c in ['open','high','low','close','vol','amount','pre_close']: df[c]=df[c].astype('float64')
         frames.append(df); added += len(df); log(f'  {d} +{len(df)}行')
     if not added:
         log('  无新交易日'); return False
@@ -48,6 +49,31 @@ def update_ohlc():
     os.replace(OHLC+'.tmp', OHLC)
     chk = pd.read_parquet(OHLC, columns=['trade_date'])
     log(f'  落盘 {len(chk)} 行, max={int(chk.trade_date.max())}'); return True
+
+# ── ①b 除权因子表增量: 新交易日里 pre_close≠前日close(>0.05%)的事件并入 ──
+def update_adj_events():
+    cur = pd.read_parquet(OHLC)
+    new = cur[cur.trade_date > int(pd.read_parquet(ADJ).trade_date.max())] if os.path.exists(ADJ) else cur.iloc[0:0]
+    if not len(new): return
+    prev = cur[cur.trade_date <= int(new.trade_date.min())-1]  # 粗过滤: 取新数据最小日前全部(内存换简单)
+    # 逐日: 当日pre_close vs 该股前一交易日close
+    evs = []
+    for d in sorted(new.trade_date.unique()):
+        day = new[new.trade_date==d][['ts_code','pre_close']]
+        pc = prev.sort_values('trade_date').groupby('ts_code').close.last().rename('prev_close')
+        m = day.join(pc, on='ts_code')
+        m = m[m.pre_close.notna() & m.prev_close.notna() & (m.prev_close>0)]
+        m = m[((m.pre_close/m.prev_close-1).abs()>0.0005)]
+        for r in m.itertuples():
+            evs.append({'ts_code':r.ts_code,'trade_date':int(d),'factor':round(float(r.pre_close)/float(r.prev_close),8)})
+        prev = pd.concat([prev, new[new.trade_date==d][['ts_code','trade_date','close']]])
+    if not evs: return
+    add = pd.DataFrame(evs); add['trade_date']=add['trade_date'].astype('int32')
+    old_ev = pd.read_parquet(ADJ)
+    out = pd.concat([old_ev, add]).drop_duplicates(['ts_code','trade_date'], keep='last')
+    assert not out.duplicated(['ts_code','trade_date']).any()
+    out.to_parquet(ADJ+'.tmp', index=False); os.replace(ADJ+'.tmp', ADJ)
+    log(f'  adj_events +{len(add)} (总{len(out)})')
 
 # ── ② cross.json 重建 (90×dates×[ret, mom20]) ──
 def build_cross():
@@ -124,6 +150,7 @@ if __name__ == '__main__':
         log('ohlc max:', int(cur.trade_date.max()), '| cross尾:', j1['dates'][-1], '| tier尾:', j2['dates'][-1])
         sys.exit(0)
     changed = update_ohlc()
+    if changed: update_adj_events()
     build_cross(); build_tier(); clear_cache()
     restart_server()
     log('DONE')

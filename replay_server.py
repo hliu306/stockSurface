@@ -26,6 +26,22 @@ TD = _tdc.merge(_ohl, on=['ts_code','trade_date'], how='left')
 TD['trade_date'] = TD['trade_date'].astype(str)
 CODES = set(TD.ts_code.unique())
 
+# 前复权(qfq, 基准=最新交易日): 除权因子表(adj_events, 源cache_td_v2的pre_close)
+#   每日factor = pre_close[t]/close[t-1], 除权日≠1; qfq[t] = raw[t] × ∏_{s>t} factor[s]
+#   TD每股按日期升序, 从尾部反向累乘, shift(-1)使当日乘的是"之后所有因子"
+_adj = pd.read_parquet(f'{RP}/adj_events.parquet')   # ts_code, trade_date(int32), factor
+_adj['trade_date'] = _adj['trade_date'].astype(str)
+TD = TD.sort_values(['ts_code','trade_date'])
+TD = TD.merge(_adj, on=['ts_code','trade_date'], how='left')
+TD['factor'] = TD['factor'].fillna(1.0)
+TD['rcum'] = TD['factor'][::-1].groupby(TD['ts_code'][::-1]).cumprod()[::-1]   # rcum[t]=∏_{s>=t} f[s]
+TD['cumf'] = (TD['rcum'] / TD['factor']).astype(float)                         # cumf[t]=∏_{s>t} f[s]
+for c in ['open','high','low','close']:
+    TD[c] = (TD[c] * TD['cumf']).round(3)
+TD['factor'] = TD['factor'].astype(float)
+TD = TD.drop(columns=['factor','cumf','rcum'])
+TD = TD.sort_values(['ts_code','trade_date']).reset_index(drop=True)
+
 IND_NAME = {}
 for fp in glob.glob(f'{BASE}/stock_heat/881*.json'):
     h = json.load(open(fp))

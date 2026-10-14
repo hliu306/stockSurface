@@ -7,7 +7,9 @@
 :root{--bg:#0d1117;--panel:#161b22;--bd:#30363d;--tx:#e6edf3;--tx2:#8b949e;--acc:#58a6ff;--up:#f85149;--dn:#3fb950;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;}
-#top{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--bd);flex-shrink:0;}
+#top{display:flex;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--bd);flex-shrink:0;}
+#top>*{margin-right:10px;}
+#top>:last-child{margin-right:0;}
 #top b{font-size:15px;}
 .sel{background:#0d1117;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:13px;max-width:220px;}
 .btn{background:#21262d;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;}
@@ -17,7 +19,9 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-
 #speed{width:64px;}
 #mid{flex:1;display:flex;min-height:0;}
 #chartWrap{flex:1;display:flex;flex-direction:column;min-width:0;padding:6px;}
-#subSwitch{display:flex;gap:6px;margin-bottom:4px;flex-shrink:0;}
+#subSwitch{display:flex;margin-bottom:4px;flex-shrink:0;}
+#subSwitch>*{margin-right:6px;}
+#subSwitch>:last-child{margin-right:0;}
 canvas{background:var(--panel);border:1px solid var(--bd);border-radius:8px;}
 #panes{position:relative;flex:none;min-height:520px;display:flex;flex-direction:column;}
 #kbar{flex:0 0 60%;min-height:200px;}
@@ -40,7 +44,9 @@ td:first-child,th:first-child{text-align:left;}
 .pos{color:var(--dn);} .neg{color:var(--up);} /* A股红涨绿跌: 涨=red class pos */
 #orderPane{background:#0d1117;border:1px solid var(--bd);border-radius:8px;padding:8px;margin-bottom:6px;}
 #orderPane input{width:100%;background:#161b22;color:var(--tx);border:1px solid var(--bd);border-radius:4px;padding:3px 6px;font-size:13px;margin:2px 0;}
-.row{display:flex;gap:6px;}
+.row{display:flex;}
+.row>*{margin-right:6px;}
+.row>:last-child{margin-right:0;}
 .row .btn{flex:1;}
 .hold{color:#d29922;} .done{color:var(--tx2);}
 #stats{font-size:12px;}

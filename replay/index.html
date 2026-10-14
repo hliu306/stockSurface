@@ -45,6 +45,15 @@ td:first-child,th:first-child{text-align:left;}
 .hold{color:#d29922;} .done{color:var(--tx2);}
 #stats{font-size:12px;}
 #stats div{display:flex;justify-content:space-between;padding:2px 4px;}
+#condBar{display:none;position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:60;
+  background:#1c2530;border:1px solid var(--acc);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--tx);
+  box-shadow:0 4px 16px rgba(0,0,0,.5);}
+#condBar b{color:var(--acc);}
+#toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:70;background:#1c2530;
+  border:1px solid var(--bd);border-radius:8px;padding:8px 18px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;}
+#toast.show{opacity:1;}
+.ordRow{display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #21262d;font-size:12px;}
+.ordRow .del{cursor:pointer;color:var(--tx2);} .ordRow .del:hover{color:var(--dn);}
 #tip{position:fixed;background:#161b22;border:1px solid var(--bd);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:99;display:none;box-shadow:0 4px 16px rgba(0,0,0,.6);}
 #members{max-height:170px;overflow-y:auto;}
 .memRow{padding:2px 6px;cursor:pointer;border-radius:4px;display:flex;justify-content:space-between;}
@@ -103,6 +112,12 @@ kbd{background:#21262d;border-radius:3px;padding:0 4px;font-size:11px;}
       <div class="row" style="margin-top:2px"><span style="color:var(--tx2);font-size:11px">持仓市值</span><b id="mval">-</b></div>
       <div class="row" style="margin-top:2px"><span style="color:var(--tx2);font-size:11px">总资产</span><b id="equity" style="color:#d29922">-</b></div>
     </div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn" style="color:var(--acc);flex:1" id="btnLineBuy">✎ 划线买入</button>
+      <button class="btn" style="color:#58a6ff;flex:1;margin-left:4px" id="btnLineSell">✎ 划线卖出</button>
+    </div>
+    <h4>条件单 <span id="ordCount" style="color:var(--tx2)"></span> (回放触及线价自动成交)</h4>
+    <div id="ordList"></div>
     <h4>当前持仓</h4>
     <table id="holdTable"></table>
     <h4>行业成分股 <span id="memCount" style="color:var(--tx2)"></span> (点击切换个股K线)</h4>
@@ -113,6 +128,8 @@ kbd{background:#21262d;border-radius:3px;padding:0 4px;font-size:11px;}
     <table id="doneTable"></table>
   </div>
 </div>
+<div id="condBar"></div>
+<div id="toast"></div>
 <div id="tip"></div>
 <script>
 'use strict';
@@ -120,6 +137,8 @@ kbd{background:#21262d;border-radius:3px;padding:0 4px;font-size:11px;}
 var UNI=null, INDNAME={}, MEMBERS={};   // universe缓存
 var IND='881169', STK=null, DATA=null, IDATA=null, IDX=250*2, PLAY=null;
 var CASH=1000000, HOLDS={}, TRADES=[], SCENE='default';
+var ORDERS=[];            // 条件单: {sym,name,side,px,q,state:'wait'|'done',placedD,doneD}
+var LINE=null;            // 划线模式: {side:'BUY'|'SELL'} 非null=鼠标预览线激活
 var VIEW=110;   // 可视蜡烛数
 var WOFF=0;     // 窗口右缘回退量(拖拽平移): 窗口=[IDX-WOFF-VIEW+1, IDX-WOFF], 右缘≤回放前沿IDX
 
@@ -409,6 +428,44 @@ function niceTicks(lo,hi,n){
   for(var i=0;i<24 && v<=hi+step*1e-6;i++,v+=step) t.push({v:v,d:dec});
   return t;
 }
+function drawOrderLines(){
+  var cv=$('kbar'); if(!cv||!DATA||!DATA.length) return;
+  var ctx=cv.getContext('2d');
+  var rect=cv.getBoundingClientRect();
+  var W=document.getElementById('panes').clientWidth;
+  ORDERS.filter(function(o){return o.state==='wait' && o.sym===(STK||IND);}).forEach(function(o){
+    var y=yFromPx(o.px); if(y==null) return;
+    ctx.save();
+    ctx.strokeStyle = o.side==='BUY'? 'rgba(63,185,80,.85)' : 'rgba(248,81,73,.85)';
+    ctx.setLineDash([6,4]); ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(PADL, y); ctx.lineTo(W-PADR, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = o.side==='BUY'? 'rgba(63,185,80,.95)' : 'rgba(248,81,73,.95)';
+    ctx.font='11px "Microsoft YaHei"';
+    var lab=(o.side==='BUY'?'买B ':'卖S ')+o.px.toFixed(2)+' ×'+o.q;
+    var tw=ctx.measureText(lab).width+10;
+    ctx.fillRect(W-PADR-tw, y-9, tw, 15);
+    ctx.fillStyle='#fff'; ctx.fillText(lab, W-PADR-tw+5, y+2);
+    ctx.restore();
+  });
+  // 划线模式预览: 鼠标Y位置的水平虚线+价格
+  if(LINE && LINE.my!=null){
+    var p=pxFromY(LINE.my);
+    if(p!=null){
+      var y2=LINE.my;
+      ctx.save();
+      ctx.strokeStyle='rgba(210,153,34,.9)'; ctx.setLineDash([4,4]); ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(PADL, y2); ctx.lineTo(W-PADR, y2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle='rgba(210,153,34,.95)'; ctx.font='12px "Microsoft YaHei"';
+      var lab2=p.toFixed(2)+(LINE.side==='BUY'?' 买入':' 卖出')+' 点击落线, ESC取消';
+      var tw2=ctx.measureText(lab2).width+10;
+      ctx.fillRect(PADL+4, Math.max(2,y2-20), tw2, 16);
+      ctx.fillStyle='#1c2530'; ctx.fillText(lab2, PADL+9, Math.max(2,y2-8));
+      ctx.restore();
+    }
+  }
+}
 function drawAll(){
   var cv=$('kbar');
   cv.style.width=''; cv.style.height='';
@@ -690,6 +747,111 @@ function trade(side){
   TRADES.push({sym:sym,name:UNI[sym]?UNI[sym].name:(INDNAME[sym]||sym),side:side==='BUY'?'BUY':'SELL',d:DATA[IDX].d,px:px,q:q});
   save(); drawAll(); renderStats();
 }
+/* ---------- 划线条件单 ---------- */
+function yFromPx(p){   // 主图价格→Y(用drawK同款尺度: 最后一根窗口的尺度重算)
+  var s=Math.max(0, IDX-WOFF-VIEW+1), e=Math.max(s, IDX-WOFF);
+  var lo=Infinity, hi=-Infinity;
+  for(var i=s;i<=e;i++){ var b=DATA[i]; if(!b) continue; if(b.l<lo)lo=b.l; if(b.h>hi)hi=b.h; }
+  if(!isFinite(lo)||!isFinite(hi)) return null;
+  var cv=$('kbar'), H=cv.clientHeight||400, top=14, bot=26;
+  var sc=(H-top-bot)/Math.max(1e-9, hi-lo);
+  return top + (hi-p)*sc;
+}
+function pxFromY(my){  // 主图Y→价格(划线取价用)
+  var s=Math.max(0, IDX-WOFF-VIEW+1), e=Math.max(s, IDX-WOFF);
+  var lo=Infinity, hi=-Infinity;
+  for(var i=s;i<=e;i++){ var b=DATA[i]; if(!b) continue; if(b.l<lo)lo=b.l; if(b.h>hi)hi=b.h; }
+  if(!isFinite(lo)||!isFinite(hi)) return null;
+  var cv=$('kbar'), H=cv.clientHeight||400, top=14, bot=26;
+  var sc=(H-top-bot)/Math.max(1e-9, hi-lo);
+  return hi - (my-top)/sc;
+}
+function toast(msg){
+  var t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._tm); t._tm=setTimeout(function(){ t.classList.remove('show'); }, 2600);
+}
+function renderOrders(){
+  var waits=ORDERS.filter(function(o){return o.state==='wait';});
+  $('ordCount').textContent=waits.length?('待触发 '+waits.length):'';
+  $('ordList').innerHTML = ORDERS.length? ORDERS.slice(-30).reverse().map(function(o,i){
+    var idx=ORDERS.length-1-Math.min(i,29);
+    return '<div class="ordRow"><span class="'+(o.side==='BUY'?'neg':'up')+'">'+o.side+'</span>'+
+      '<span style="flex:1;padding:0 6px">'+o.name+' @'+o.px.toFixed(2)+' ×'+o.q+'</span>'+
+      (o.state==='wait'
+        ? '<span class="del" data-i="'+idx+'" title="撤销">✕</span>'
+        : '<span style="color:var(--tx2)">'+(o.doneD?('✓ '+o.doneD.slice(4)):'撤')+'</span>')+
+      '</div>';
+  }).join('') : '<div style="color:var(--tx2);font-size:12px">无</div>';
+  Array.prototype.forEach.call($('ordList').querySelectorAll('.del'), function(el){
+    el.onclick=function(){ ORDERS[+el.dataset.i].state='cancelled'; renderOrders(); drawAll(); save(); };
+  });
+}
+function enterLine(side){
+  LINE={side:side, my:null};
+  var cb=$('condBar');
+  cb.style.display='block';
+  cb.innerHTML='<b>✎ 划线'+(side==='BUY'?'买入':'卖出')+'</b> — 在主图移动鼠标选价, <b>点击</b>落线 | ESC取消';
+}
+function cancelLine(){ LINE=null; $('condBar').style.display='none'; drawAll(); }
+function bindLineEvents(){
+  var kb=$('kbar');
+  kb.addEventListener('mousemove', function(ev){
+    if(!LINE) return;
+    var r=kb.getBoundingClientRect();
+    LINE.my = ev.clientY - r.top;
+    drawOrderLines();
+  });
+  kb.addEventListener('click', function(ev){
+    if(!LINE) return;
+    var r=kb.getBoundingClientRect();
+    var p=pxFromY(ev.clientY - r.top);
+    if(p==null) return;
+    var q=parseInt($('qty').value||'0',10);
+    if(!q || q%100){ toast('先在右侧填好股数(100整数倍)'); return; }
+    var sym=STK||IND;
+    ORDERS.push({sym:sym, name:UNI[sym]?UNI[sym].name:(INDNAME[sym]||sym), side:LINE.side, px:Math.round(p*100)/100, q:q, state:'wait', placedD:DATA[IDX]?DATA[IDX].d:''});
+    cancelLine();
+    toast('条件单已挂 ✓ (回放触及线价自动成交)');
+    renderOrders(); drawAll(); save();
+  });
+}
+function execOrders(fromIdx){   // 检查 (fromIdx, IDX] 的新K线是否触发(步进/播放/换股后调)
+  if(!DATA.length) return;
+  var fired=false;
+  for(var i=fromIdx+1;i<=IDX;i++){
+    var b=DATA[i]; if(!b) continue;
+    ORDERS.forEach(function(o){
+      if(o.state!=='wait' || o.sym!==(STK||IND)) return;   // 只对当前标的挂的单(与真实交易一致: 单跟标的走)
+      var hit = b.l<=o.px && b.h>=o.px;
+      if(hit){
+        o.state='done'; o.doneD=b.d;
+        var fillPx = o.px;   // 口径: 触及线价即按线价成交(保守可复算; 开盘跳空越过线的情形也按线价)
+        execTrade(o, fillPx, b.d);
+        fired=true;
+        toast('条件单触发 '+o.side+' '+o.name+' @'+fillPx.toFixed(2)+' ('+b.d.slice(4)+')');
+      }
+    });
+  }
+  if(fired){ renderOrders(); renderStats(); save(); }
+}
+function execTrade(o, px, d){   // 条件单成交复用trade的账务(不alert, 不走UI输入)
+  var sym=o.sym;
+  if(o.side==='BUY'){
+    var cost=o.q*px;
+    if(cost>CASH){ o.state='cancelled'; toast('条件单现金不足已撤: '+o.name); return; }
+    CASH-=cost;
+    var h=HOLDS[sym]||{q:0,cost:0,lastPx:px};
+    h.cost=(h.cost*h.q+cost)/(h.q+o.q); h.q+=o.q; h.lastPx=px; HOLDS[sym]=h;
+  } else {
+    var h2=HOLDS[sym];
+    if(!h2 || h2.q<o.q){ o.state='cancelled'; toast('条件单持仓不足已撤: '+o.name); return; }
+    h2.q-=o.q; CASH+=o.q*px;
+    var pnl=(px-h2.cost)*o.q;
+    TRADES.push({sym:sym,name:o.name,side:'SELL',d:d,px:px,q:o.q,cost:h2.cost,pnl:pnl,ret:px/h2.cost-1});
+    if(h2.q===0) delete HOLDS[sym]; else HOLDS[sym]=h2;
+  }
+  TRADES.push({sym:sym,name:o.name,side:o.side,d:d,px:px,q:o.q});
+}
 function renderStats(){
   var sells=TRADES.filter(function(t){return t.pnl!==undefined;});
   var wins=sells.filter(function(t){return t.pnl>0;});
@@ -711,19 +873,21 @@ function renderStats(){
     }).join('');
 }
 function save(){
-  fetch('/replay/trade?scene='+SCENE,{method:'POST',body:JSON.stringify({scene:SCENE,cash:CASH,holds:HOLDS,trades:TRADES})});
+  fetch('/replay/trade?scene='+SCENE,{method:'POST',body:JSON.stringify({scene:SCENE,cash:CASH,holds:HOLDS,trades:TRADES,orders:ORDERS})});
 }
 function loadSave(){
   fetch('/replay/trade?scene='+SCENE).then(r=>r.json()).then(j=>{
-    CASH=j.cash!=null?j.cash:1000000; HOLDS=j.holds||{}; TRADES=j.trades||[];
+    CASH=j.cash!=null?j.cash:1000000; HOLDS=j.holds||{}; TRADES=j.trades||[]; ORDERS=j.orders||[];
     renderStats(); drawAll();
   });
 }
 
 /* ---------- 交互 ---------- */
 function step(n){
+  var from=IDX;
   IDX=Math.max(VIEW-1, Math.min(DATA.length-1, IDX+n));
   VIEW=Math.min(VIEW, IDX+1);   // 回放纪律: 向左步进后历史变短, VIEW随缩
+  if(IDX>from) execOrders(from);   // 前进的新K线逐根检查条件单
   drawAll();
 }
 function bind(){
@@ -731,12 +895,15 @@ function bind(){
   $('btnNext').onclick=function(){ step(1); };
   $('btnPlay').onclick=togglePlay;
   $('btnBuy').onclick=function(){ trade('BUY'); };
+  $('btnLineBuy').onclick=function(){ enterLine('BUY'); };
+  $('btnLineSell').onclick=function(){ enterLine('SELL'); };
   $('btnSell').onclick=function(){ trade('SELL'); };
   $('btnReset').onclick=function(){
     if(!confirm('清空交易记录+持仓, 资金回到100万? (场景 '+SCENE+')')) return;
-    CASH=1000000; HOLDS={}; TRADES=[];
-    save(); renderStats(); drawAll();
+    CASH=1000000; HOLDS={}; TRADES=[]; ORDERS=[]; LINE=null; $('condBar').style.display='none';
+    save(); renderStats(); renderOrders(); drawAll();
   };
+  renderOrders(); bindLineEvents();
   $('indSel').onchange=function(){ IND=this.value; STK=null; $('stkSel').value=''; loadChart(function(){ drawAll(); renderMembers(); }); };
   $('stkSel').onchange=function(){ STK=this.value||null; loadChart(function(){ drawAll(); }); };
 
@@ -756,6 +923,7 @@ function bind(){
     else if(e.key==='ArrowRight'||e.key==='PageDown'){ step(1); e.preventDefault(); }
     else if(e.key===' '){ togglePlay(); e.preventDefault(); }
     else if(e.key==='Home'){ IDX=VIEW-1; WOFF=0; VIEW=Math.min(VIEW, IDX+1); drawAll(); }
+    else if(e.key==='Escape'&&LINE){ cancelLine(); }
     else if(e.key==='b'||e.key==='B'){ trade('BUY'); }
     else if(e.key==='s'||e.key==='S'){ trade('SELL'); }
   });
@@ -799,7 +967,7 @@ function bind(){
     var h=Math.max(avail, need);
     if(panesEl.style.height!==h+'px') panesEl.style.height=h+'px';
   }
-  var _drawAll0=drawAll; drawAll=function(){ _drawAll0(); layoutPanes(); };   // 每次重绘后保证布局含全量热区
+  var _drawAll0=drawAll; drawAll=function(){ _drawAll0(); drawOrderLines(); layoutPanes(); };   // 重绘后: 条件单线+布局
   layoutPanes();
   window.addEventListener('resize', function(){ layoutPanes(); drawAll(); });
   // ---- vSplit拖拽: ibar像素高增减, heatWrap自动吃剩余; 拖到底=热力图全量展开(panes随内容加高→整页滚) ----

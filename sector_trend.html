@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>板块趋势观察 · 90行业小图矩阵</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--bd:#30363d;--tx:#e6edf3;--tx2:#8b949e;--acc:#58a6ff;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--tx);font:13px/1.45 "Microsoft YaHei",sans-serif;padding:12px 14px;}
+h1{font-size:17px;margin-bottom:2px;}
+.note{color:var(--tx2);font-size:12px;margin-bottom:10px;}
+.bar{display:flex;align-items:center;margin-right:0;padding:6px 0;border-bottom:1px solid var(--bd);margin-bottom:10px;flex-wrap:wrap;}
+.bar>*{margin-right:10px;}
+.bar>:last-child{margin-right:0;}
+.legend{color:var(--tx2);font-size:12px;}
+.seg{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden;}
+.seg button{background:var(--panel);color:var(--tx2);border:none;padding:4px 10px;cursor:pointer;font-size:12px;}
+.seg button.on{background:#1f6feb;color:#fff;}
+select,input{background:var(--panel);color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:12px;}
+#grid{display:flex;flex-wrap:wrap;}
+.card{width:239px;margin:0 10px 12px 0;border:1px solid var(--bd);border-radius:8px;background:var(--panel);padding:8px 10px;cursor:pointer;}
+.card:hover{border-color:var(--acc);}
+.card.hi{border-color:#1f6feb;box-shadow:0 0 0 1px #1f6feb;}
+.chead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px;}
+.chead>*{margin-right:0;}
+.cname{font-weight:bold;font-size:13px;}
+.cname:hover{color:var(--acc);}
+.cstat{font-size:11px;padding:1px 6px;border-radius:8px;border:1px solid var(--bd);}
+.st-up{color:#3fb950;border-color:#238636;background:rgba(35,134,54,.15);}
+.st-pb{color:#d29922;border-color:#9e6a03;background:rgba(158,106,3,.15);}
+.st-flat{color:#8b949e;}
+.st-dn{color:#f85149;border-color:#da3633;background:rgba(218,54,51,.15);}
+.cstats{display:flex;gap:0;font-size:11px;color:var(--tx2);margin-bottom:4px;}
+.cstats span{margin-right:10px;}
+.cstats span:last-child{margin-right:0;}
+.pos{color:#3fb950;} .neg{color:#f85149;} .gray{color:#8b949e;}
+canvas.spark{width:100%;height:96px;display:block;}
+#tip{position:fixed;background:#161b22;border:1px solid var(--bd);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:99;display:none;box-shadow:0 4px 16px rgba(0,0,0,.6);max-width:360px;}
+#tip b{color:var(--acc);}
+#tip table{border-collapse:collapse;margin-top:4px;}
+#tip td,#tip th{padding:1px 6px;font-size:11px;border-bottom:1px solid #21262d;}
+</style>
+</head>
+<body>
+<h1>板块趋势观察 · 90行业小图矩阵</h1>
+<div class="note" id="metaNote">先筛趋势再看曲线: 每板块近120日走势+20/60日均线 · 统一时间窗统一纵轴 · 按趋势强度排序 · 点击卡片在 sector_strength 大图对比</div>
+
+<div class="bar">
+  <span class="legend">形态</span>
+  <div class="seg" id="segShape">
+    <button data-s="all" class="on">全部形态</button>
+    <button data-s="up">只看上行</button>
+  </div>
+  <span class="legend">排序</span>
+  <select id="sortSel">
+    <option value="trend">趋势强度(近20日动量+结构)</option>
+    <option value="chg20">近20日涨幅</option>
+    <option value="chg60">近60日涨幅</option>
+    <option value="dd">距高点回撤(小→大)</option>
+    <option value="chg">区间涨幅</option>
+    <option value="code">代码</option>
+  </select>
+  <span class="legend">窗口</span>
+  <div class="seg" id="segRange">
+    <button data-r="60">60日</button>
+    <button data-r="120" class="on">120日</button>
+    <button data-r="250">一年</button>
+  </div>
+  <span class="legend">归一</span>
+  <div class="seg" id="segNorm">
+    <button data-n="win" class="on">窗口起点</button>
+    <button data-n="raw">原始</button>
+  </div>
+  <input type="text" id="q" placeholder="搜行业名…">
+</div>
+<div id="grid"></div>
+<div id="tip"></div>
+
+<script>
+'use strict';
+/* 设计(用户方案①③): 趋势小图矩阵 — 先筛趋势再看曲线
+   · 每卡: 名称+状态标签 / 近20日·60日涨幅 / 距60日高点回撤 / 120日曲线+MA20(实线细)+MA60(虚线)
+   · 状态判定(可解释观察口径, 周期阈值可后调):
+     持续上行: MA20>MA60 且两者均上移 且 距高点回撤<8%
+     上行回调: MA20>MA60 且距高点回撤>=8%
+     横盘: |近20日涨幅|<3% 且回撤<10%
+     转弱: 其余(均线死叉或下行)
+   · 统一纵轴: 同批卡片共用 [min,max]=全行业窗内累计涨幅范围 → 微涨不会被放大成陡峭趋势
+   · 点击卡片 → 跳 sector_strength.html 并选中该行业大图对比
+*/
+var DATA=null, CODES=[], NAMES={}, RANGE=120, SHAPE='all', SORT='trend', NORM='win';
+var ST=null;   // 每行业状态缓存
+function fmtPct(x){ return (x>=0?'+':'')+(x*100).toFixed(1)+'%'; }
+function fmtDate(s){ return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8); }
+
+fetch('sector_close.json?_='+Date.now()).then(function(r){return r.json();}).then(function(d){
+  DATA=d; NAMES=d.names||{};
+  CODES=Object.keys(d.series).sort();
+  var seg=document.getElementById('segShape');
+  seg.querySelectorAll('button').forEach(function(b){ b.onclick=function(){
+    seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on');}); b.classList.add('on');
+    SHAPE=b.dataset.s; render(); };});
+  var sr=document.getElementById('segRange');
+  sr.querySelectorAll('button').forEach(function(b){ b.onclick=function(){
+    sr.querySelectorAll('button').forEach(function(x){x.classList.remove('on');}); b.classList.add('on');
+    RANGE=+b.dataset.r; render(); };});
+  var sn=document.getElementById('segNorm');
+  sn.querySelectorAll('button').forEach(function(b){ b.onclick=function(){
+    sn.querySelectorAll('button').forEach(function(x){x.classList.remove('on');}); b.classList.add('on');
+    NORM=b.dataset.n; render(); };});
+  document.getElementById('sortSel').onchange=function(){ SORT=this.value; render(); };
+  document.getElementById('q').oninput=function(){ render(); };
+  render();
+}).catch(function(e){ document.getElementById('metaNote').textContent='加载失败: '+e; });
+
+// 对齐行业序列到全局日期轴(行业轴有洞)
+function aligned(c){
+  var ser=DATA.series[c];
+  var dmap={}; for(var i=0;i<ser.length;i++) dmap[String(ser[i][0])]=ser[i][1];
+  return DATA.dates.map(function(d){ return (d in dmap)? dmap[d] : null; });
+}
+function ma(arr,w,i){   // 简单均线: 以i结尾往前w个非空值
+  var s=0,n=0;
+  for(var k=i-w+1;k<=i;k++){ if(k>=0&&arr[k]!=null){s+=arr[k];n++;} }
+  return n>=w*0.9 ? s/n : null;
+}
+
+function render(){
+  if(!DATA) return;
+  var dates=DATA.dates.slice(Math.max(0,DATA.dates.length-RANGE));
+  var g0=DATA.dates.length-dates.length;
+  var metrics={}, normSeries={};
+  var lo=Infinity, hi=-Infinity;
+  CODES.forEach(function(c){
+    var all=aligned(c);
+    // 窗内净值(窗口起点=100)
+    var vals=[]; var base=null;
+    for(var i=0;i<dates.length;i++){
+      var v=all[g0+i];
+      if(v!=null && base==null) base=v;
+      vals.push(v!=null&&base ? v/base*100 : null);
+    }
+    normSeries[c]=vals;
+    // 指标(基于原始价, 不受归一影响)
+    var chg20=null, chg60=null, dd=null, ma20Now=null, ma60Now=null, ma20Up=false, ma60Up=false, lastI=-1;
+    for(var j=dates.length-1;j>=0;j--){ if(all[g0+j]!=null){ lastI=j; break; } }
+    if(lastI>=0){
+      var li=g0+lastI;
+      var cur=all[li];
+      var p20=all[li-20], p60=all[li-60];    // 20/60根前(约20/60交易日, null容忍)
+      if(p20!=null) chg20=cur/p20-1;
+      if(p60!=null) chg60=cur/p60-1;
+      // 60日内高点回撤
+      var hh=-Infinity;
+      for(var k=li-59;k<=li;k++){ if(k>=0&&all[k]!=null&&all[k]>hh) hh=all[k]; }
+      if(hh>-Infinity&&hh>0) dd=cur/hh-1;
+      ma20Now=ma(all,20,li); ma60Now=ma(all,60,li);
+      var ma20Prev=ma(all,20,li-5), ma60Prev=ma(all,60,li-5);
+      if(ma20Now!=null&&ma20Prev!=null) ma20Up=ma20Now>ma20Prev;
+      if(ma60Now!=null&&ma60Prev!=null) ma60Up=ma60Now>ma60Prev;
+    }
+    metrics[c]={chg20:chg20,chg60:chg60,dd:dd,ma20Up:ma20Up,ma60Up:ma60Up,ma20Now:ma20Now,ma60Now:ma60Now,lastI:lastI};
+    vals.forEach(function(v){ if(v!=null){ if(v<lo)lo=v; if(v>hi)hi=v; } });
+  });
+  if(!isFinite(lo)){lo=0;hi=100;}
+  // 状态判定
+  var st={};
+  CODES.forEach(function(c){
+    var m=metrics[c];
+    if(m.chg20==null||m.chg60==null||m.dd==null){ st[c]='flat'; m.rank=-1e9; return; }
+    var bull = m.ma20Up && m.ma60Up && m.ma20Now!=null && m.ma60Now!=null && m.ma20Now>m.ma60Now;
+    if(bull && m.dd>-0.08) st[c]='up';
+    else if(bull && m.dd<=-0.08) st[c]='pb';
+    else if(!bull && m.chg20>-0.03 && m.chg20<0.03 && m.dd>-0.10) st[c]='flat';
+    else st[c]='dn';
+    // 排序值: 趋势强度=近20日动量 + 均线上移 + 回撤惩罚
+    m.rank = (m.chg20||0)*2 + (m.chg60||0)*0.5 + (m.ma20Up?0.05:0) + (m.ma60Up?0.05:0) + (m.dd||0)*0.5;
+  });
+  ST=st;
+  // 过滤+排序
+  var q=(document.getElementById('q').value||'').trim();
+  var list=CODES.filter(function(c){ return (!q || (NAMES[c]||'').indexOf(q)>=0 || c.indexOf(q)>=0); });
+  if(SHAPE==='up') list=list.filter(function(c){ return st[c]==='up'||st[c]==='pb'; });
+  var cmp={ trend:function(a,b){return metrics[b].rank-metrics[a].rank;},
+            chg20:function(a,b){return (metrics[b].chg20==null?0:metrics[b].chg20)-(metrics[a].chg20==null?0:metrics[a].chg20);},
+            chg60:function(a,b){return (metrics[b].chg60||0)-(metrics[a].chg60||0);},
+            dd:function(a,b){return (metrics[a].dd==null?9:metrics[a].dd)-(metrics[b].dd==null?9:metrics[b].dd);},
+            chg:function(a,b){ var av=normSeries[a],bv=normSeries[b];
+              function lastv(x){ for(var i=x.length-1;i>=0;i--) if(x[i]!=null) return x[i]; return 0; }
+              return lastv(bv)-lastv(av); },
+            code:function(a,b){return a<b?-1:1;} };
+  list.sort(cmp[SORT]||cmp.trend);
+  drawGrid(dates, list, metrics, normSeries, lo, hi, st);
+  var cnt={up:0,pb:0,flat:0,dn:0}; CODES.forEach(function(c){ cnt[st[c]]++; });
+  document.getElementById('metaNote').textContent='数据: ths_kline 90行业 · '+dates.length+'日 ('+fmtDate(dates[0])+' → '+fmtDate(dates[dates.length-1])+') · 纵轴统一['+lo.toFixed(0)+','+hi.toFixed(0)+'] · 持续上行'+cnt.up+' 上行回调'+cnt.pb+' 横盘'+cnt.flat+' 转弱'+cnt.dn+' · 点击卡片→大图对比';
+}
+
+function drawGrid(dates, list, metrics, normSeries, lo, hi, st){
+  var grid=document.getElementById('grid');
+  var html=list.map(function(c){
+    var m=metrics[c];
+    var s=st[c];
+    var sTxt={up:'持续上行',pb:'上行回调',flat:'横盘',dn:'转弱'}[s];
+    var sCls={up:'st-up',pb:'st-pb',flat:'st-flat',dn:'st-dn'}[s];
+    return '<div class="card'+(HI===c?' hi':'')+'" data-c="'+c+'">'+
+      '<div class="chead"><span class="cname">'+(NAMES[c]||c)+'</span><span class="cstat '+sCls+'">'+sTxt+'</span></div>'+
+      '<div class="cstats"><span>20日 <b class="'+(m.chg20>=0?'pos':'neg')+'">'+(m.chg20==null?'—':fmtPct(m.chg20))+'</b></span>'+
+      '<span>60日 <b class="'+(m.chg60>=0?'pos':'neg')+'">'+(m.chg60==null?'—':fmtPct(m.chg60))+'</b></span>'+
+      '<span>距高点 <b class="'+((m.dd||0)>-0.08?'pos':'neg')+'">'+(m.dd==null?'—':fmtPct(m.dd))+'</b></span></div>'+
+      '<canvas class="spark" data-c="'+c+'" width="219" height="96"></canvas></div>';
+  }).join('');
+  grid.innerHTML=html;
+  // 画小图
+  grid.querySelectorAll('canvas.spark').forEach(function(cv){
+    var c=cv.dataset.c;
+    drawSpark(cv, c, dates, normSeries[c], lo, hi);
+    // 悬停提示
+    cv.onmousemove=function(e){ sparkTip(e, cv, c, dates, normSeries[c], lo, hi); };
+    cv.onmouseleave=function(){ document.getElementById('tip').style.display='none'; };
+  });
+  grid.querySelectorAll('.card').forEach(function(card){
+    card.onclick=function(){
+      var c=card.dataset.c;
+      HI = (HI===c) ? null : c;
+      grid.querySelectorAll('.card').forEach(function(x){ x.classList.toggle('hi', x.dataset.c===HI); });
+    };
+    card.ondblclick=function(){
+      // 双击=进大图页选中对比
+      window.location.href='sector_strength.html?c='+card.dataset.c;
+    };
+  });
+  document.title='板块趋势观察 · '+list.length+'个行业';
+}
+var HI=null;
+
+function drawSpark(cv, c, dates, vals, lo, hi){
+  var ctx=cv.getContext('2d');
+  var W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  var pad=6;
+  var span=(hi-lo)||1;
+  var X=function(i){ return pad+(W-2*pad)*i/Math.max(1,dates.length-1); };
+  var Y=function(v){ return pad+(H-2*pad)*(1-(v-lo)/span); };
+  // 零轴(=100)
+  if(lo<100&&hi>100){ ctx.strokeStyle='#30363d'; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(pad,Y(100)); ctx.lineTo(W-pad,Y(100)); ctx.stroke(); }
+  // MA20/MA60(在净值序列上计算 — 展示用, 判定用原始价; 差异微小)
+  function maSeries(w){
+    var out=[];
+    for(var i=0;i<vals.length;i++){
+      var s=0,n=0;
+      for(var k=i-w+1;k<=i;k++){ if(k>=0&&vals[k]!=null){s+=vals[k];n++;} }
+      out.push(n>=w*0.9? s/n : null);
+    }
+    return out;
+  }
+  var ma60=maSeries(60);
+  ctx.strokeStyle='rgba(139,148,158,0.9)'; ctx.lineWidth=1; ctx.setLineDash([4,3]);
+  ctx.beginPath(); var st1=false;
+  for(var i=0;i<ma60.length;i++){ if(ma60[i]==null){st1=false;continue;} if(!st1){ctx.moveTo(X(i),Y(ma60[i]));st1=true;} else ctx.lineTo(X(i),Y(ma60[i])); }
+  ctx.stroke();
+  var ma20=maSeries(20);
+  ctx.setLineDash([]); ctx.strokeStyle='rgba(210,153,34,0.85)'; ctx.lineWidth=1.2;
+  ctx.beginPath(); var st2=false;
+  for(var i=0;i<ma20.length;i++){ if(ma20[i]==null){st2=false;continue;} if(!st2){ctx.moveTo(X(i),Y(ma20[i]));st2=true;} else ctx.lineTo(X(i),Y(ma20[i])); }
+  ctx.stroke();
+  // 主线(状态色)
+  var col={up:'#3fb950',pb:'#d29922',flat:'#8b949e',dn:'#f85149'}[ST[c]];
+  ctx.strokeStyle=col; ctx.lineWidth=1.6;
+  ctx.beginPath(); var st3=false;
+  for(var i=0;i<vals.length;i++){ if(vals[i]==null){st3=false;continue;} if(!st3){ctx.moveTo(X(i),Y(vals[i]));st3=true;} else ctx.lineTo(X(i),Y(vals[i])); }
+  ctx.stroke();
+  // 终点圆点
+  for(var i=vals.length-1;i>=0;i--){ if(vals[i]!=null){ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(X(i),Y(vals[i]),2.5,0,7); ctx.fill(); break; } }
+  // 图例(首卡画一次即可 — 全卡都画太噪, 悬停提示里有)
+}
+function sparkTip(e, cv, c, dates, vals, lo, hi){
+  var tip=document.getElementById('tip');
+  var rect=cv.getBoundingClientRect();
+  var mx=e.clientX-rect.left;
+  var W=cv.width, pad=6;
+  var i=Math.round((mx-pad)/((W-2*pad)/Math.max(1,dates.length-1)));
+  if(i<0||i>=dates.length){ tip.style.display='none'; return; }
+  var v=vals[i];
+  if(v==null){ tip.style.display='none'; return; }
+  var h='<b>'+(NAMES[c]||c)+'</b> · '+fmtDate(dates[i])+'<br>净值 '+v.toFixed(1)+' (窗口起点=100)';
+  tip.innerHTML=h; tip.style.display='block';
+  tip.style.left=Math.min(e.clientX+14, window.innerWidth-280)+'px';
+  tip.style.top=(e.clientY+12)+'px';
+}
+</script>
+</body>
+</html>

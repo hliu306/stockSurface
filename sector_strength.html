@@ -122,6 +122,9 @@ fetch('sector_close.json?_='+Date.now()).then(function(r){return r.json();}).the
     MODE=b.dataset.m; render(); };});
   document.getElementById('sortSel').onchange=function(){ SORT=this.value; render(); };
   document.getElementById('q').oninput=function(){ render(); };
+  // 从 sector_trend 小图矩阵跳入: ?c=881xxx 自动选中高亮
+  var pc=null; try{ pc=new URLSearchParams(location.search).get('c'); }catch(e){}
+  if(pc && DATA.series[pc]) HI=pc;
   render();
 }).catch(function(e){ document.getElementById('metaNote').textContent='加载失败: '+e; });
 
